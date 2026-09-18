@@ -1,0 +1,20 @@
+{
+  "title": "Qwen Image Edit Uncensored v1.1 GGUF",
+  "description": "Qwen Image Edit v1.1 GGUF on ComfyUI-GGUF as a RunPod Serverless endpoint.",
+  "type": "serverless",
+  "category": "image",
+  "iconUrl": "https://cpjrphpz3t5wbwfe.public.blob.vercel-storage.com/comfy-ui.png",
+  "config": {
+    "runsOn": "GPU",
+    "containerDiskInGb": 30,
+    "gpuIds": "ADA_24",
+    "gpuCount": 1,
+    "allowedCudaVersions": [
+      "12.8",
+      "12.9",
+      "13.0",
+      "13.1",
+      "13.2"
+    ]
+  }
+}
