@@ -1,3 +1,5 @@
+[![RunPod](https://api.runpod.io/badge/jiankeong/qwen-image-edit-runpod)](https://console.runpod.io/hub/jiankeong/qwen-image-edit-runpod)
+
 # Qwen Image Edit Uncensored v1.1 GGUF — RunPod Serverless
 
 Target diffusion model:
@@ -55,3 +57,12 @@ The diffusion GGUF repository can change its filenames. `scripts/download_models
 This keeps the workflow filename stable.
 
 If the model repository later changes architecture incompatibly, the Docker build may still succeed while the workflow needs updating.
+
+
+## RunPod Hub files
+
+This repository includes `.runpod/hub.json`, `.runpod/tests.json`, and a root
+`handler.py` for RunPod Hub validation. The built image itself inherits the
+production handler/startup logic from the official `runpod/worker-comfyui`
+base image; the Dockerfile intentionally does not overwrite it with the
+repository validation stub.
