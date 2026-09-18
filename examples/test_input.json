@@ -1,0 +1,147 @@
+{
+  "input": {
+    "workflow": {
+      "1": {
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "input.png"
+        }
+      },
+      "2": {
+        "class_type": "CLIPLoader",
+        "inputs": {
+          "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "type": "qwen_image",
+          "device": "default"
+        }
+      },
+      "3": {
+        "class_type": "VAELoader",
+        "inputs": {
+          "vae_name": "qwen_image_vae.safetensors"
+        }
+      },
+      "4": {
+        "class_type": "UnetLoaderGGUF",
+        "inputs": {
+          "unet_name": "qwen_image_edit_uncensored_q4.gguf"
+        }
+      },
+      "5": {
+        "class_type": "ModelSamplingAuraFlow",
+        "inputs": {
+          "model": [
+            "4",
+            0
+          ],
+          "shift": 1.73
+        }
+      },
+      "6": {
+        "class_type": "TextEncodeQwenImageEdit",
+        "inputs": {
+          "clip": [
+            "2",
+            0
+          ],
+          "prompt": "change the shirt to black",
+          "vae": [
+            "3",
+            0
+          ],
+          "image": [
+            "1",
+            0
+          ]
+        }
+      },
+      "7": {
+        "class_type": "TextEncodeQwenImageEdit",
+        "inputs": {
+          "clip": [
+            "2",
+            0
+          ],
+          "prompt": "",
+          "vae": [
+            "3",
+            0
+          ],
+          "image": [
+            "1",
+            0
+          ]
+        }
+      },
+      "8": {
+        "class_type": "VAEEncode",
+        "inputs": {
+          "pixels": [
+            "1",
+            0
+          ],
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "9": {
+        "class_type": "KSampler",
+        "inputs": {
+          "model": [
+            "5",
+            0
+          ],
+          "seed": 123456789,
+          "steps": 20,
+          "cfg": 4.0,
+          "sampler_name": "euler",
+          "scheduler": "simple",
+          "positive": [
+            "6",
+            0
+          ],
+          "negative": [
+            "7",
+            0
+          ],
+          "latent_image": [
+            "8",
+            0
+          ],
+          "denoise": 1.0
+        }
+      },
+      "10": {
+        "class_type": "VAEDecode",
+        "inputs": {
+          "samples": [
+            "9",
+            0
+          ],
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "11": {
+        "class_type": "SaveImage",
+        "inputs": {
+          "filename_prefix": "qwen_edit",
+          "images": [
+            "10",
+            0
+          ]
+        }
+      }
+    },
+    "images": [
+      {
+        "name": "input.png",
+        "image": "https://images.unsplash.com/photo-1500648767791-00dcc994a43e"
+      }
+    ]
+  }
+}
