@@ -14,6 +14,7 @@ This deployment keeps the large model files on the RunPod Network Volume (`/runp
 - Prefers a Q4_K_M / Q4 quant when the repository contains one
 - Stores the selected transformer as `/runpod-volume/models/diffusion_models/qwen_image_edit_uncensored_q4.gguf`
 - Downloads Qwen2.5-VL text encoder, mmproj, and Qwen Image VAE to the same Network Volume
+- Maps `models/text_encoders` and `models/diffusion_models` into ComfyUI's `clip` and `unet` search paths so the GGUF loader can find the downloaded files
 - Keeps `.runpod/tests.json`; Hub smoke tests set `USE_MOCK_PIPELINE=1` so they do not download model weights
 
 ## Network Volume

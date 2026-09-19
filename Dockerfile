@@ -10,6 +10,7 @@ RUN git clone --depth 1 https://github.com/city96/ComfyUI-GGUF.git /comfyui/cust
 
 COPY scripts/bootstrap_models.py /opt/qwen/bootstrap_models.py
 COPY scripts/start_qwen.sh /opt/qwen/start_qwen.sh
+COPY config/extra_model_paths.yaml /comfyui/extra_model_paths.yaml
 COPY handler.py /workspace/handler.py
 
 # Prepare Network Volume models before starting the inherited ComfyUI worker.
