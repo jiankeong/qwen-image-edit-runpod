@@ -19,7 +19,7 @@
   ],
   "config": {
     "gpuCount": 1,
-    "allowedCudaVersions": ["12.4", "12.5", "12.6", "12.7", "12.8", "12.9", "13.0", "13.1", "13.2", "13.3"],
+    "allowedCudaVersions": ["12.8", "12.9", "13.0", "13.1", "13.2", "13.3"],
     "gpuTypeId": "NVIDIA L4",
     "env": [
       {"key": "USE_MOCK_PIPELINE", "value": "1"}
