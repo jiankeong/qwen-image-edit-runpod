@@ -1,4 +1,4 @@
-FROM runpod/worker-comfyui:5.8.6
+FROM runpod/worker-comfyui:5.8.6-base
 
 USER root
 

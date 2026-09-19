@@ -8,7 +8,7 @@ This deployment keeps the large model files on the RunPod Network Volume (`/runp
 
 ## What it does
 
-- Base image: `runpod/worker-comfyui:5.8.6`
+- Base image: `runpod/worker-comfyui:5.8.6-base`
 - Installs `city96/ComfyUI-GGUF`
 - Discovers the actual `.gguf` file from the requested Hugging Face repository at worker startup
 - Prefers a Q4_K_M / Q4 quant when the repository contains one
