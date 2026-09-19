@@ -1,6 +1,6 @@
 {
-  "title": "Qwen Image Edit Uncensored GGUF",
-  "description": "Qwen Image Edit uncensored GGUF worker for RunPod Serverless. Weights are cached on a Network Volume at runtime.",
+  "title": "FLUX.1 Dev + Shar514 Flux Uncensored V2 LoRA",
+  "description": "FLUX.1-dev FP8 image-to-image worker with Shar514 Flux Uncensored V2 LoRA; models cached on a Network Volume.",
   "type": "serverless",
   "category": "image",
   "config": {
@@ -8,7 +8,14 @@
     "containerDiskInGb": 40,
     "gpuCount": 1,
     "gpuIds": "ADA_24,AMPERE_24,ADA_48_PRO,AMPERE_48,ADA_80_PRO,AMPERE_80",
-    "allowedCudaVersions": ["12.8", "12.9", "13.0", "13.1", "13.2", "13.3"],
+    "allowedCudaVersions": [
+      "12.8",
+      "12.9",
+      "13.0",
+      "13.1",
+      "13.2",
+      "13.3"
+    ],
     "env": [
       {
         "key": "HF_TOKEN",
@@ -20,12 +27,12 @@
         }
       },
       {
-        "key": "QWEN_HF_REPO",
+        "key": "FLUX_LORA_REPO",
         "input": {
-          "name": "Qwen uncensored GGUF repo",
+          "name": "FLUX LoRA repository",
           "type": "string",
-          "description": "Hugging Face repository containing the uncensored diffusion GGUF.",
-          "default": "ChrisColeTech/qwen-image-edit-uncensored-GGUF",
+          "description": "Hugging Face repository containing the LoRA safetensors file.",
+          "default": "Shar514/Flux-Uncensored-V2",
           "advanced": true
         }
       },
@@ -36,8 +43,14 @@
           "type": "string",
           "description": "Set to 1 only for RunPod Hub smoke tests. Skips model downloads.",
           "options": [
-            {"label": "Disabled", "value": "0"},
-            {"label": "Enabled", "value": "1"}
+            {
+              "label": "Disabled",
+              "value": "0"
+            },
+            {
+              "label": "Enabled",
+              "value": "1"
+            }
           ],
           "default": "0",
           "advanced": true

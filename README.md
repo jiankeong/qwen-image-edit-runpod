@@ -1,37 +1,19 @@
-# Qwen Image Edit Uncensored GGUF — RunPod Serverless
+# FLUX.1-dev + Shar514 Flux-Uncensored-V2 — RunPod Serverless
 
-Target model repository:
+The requested [Shar514/Flux-Uncensored-V2](https://huggingface.co/Shar514/Flux-Uncensored-V2) is a **LoRA adapter**, not a standalone checkpoint or Qwen GGUF. This worker loads the [Comfy-Org FLUX.1-dev FP8 checkpoint](https://huggingface.co/Comfy-Org/flux1-dev/blob/main/flux1-dev-fp8.safetensors), then applies the requested LoRA in ComfyUI. The base checkpoint is about 17.2 GB. The startup script discovers the adapter's `.safetensors` filename from Hugging Face instead of relying on the model card's inconsistent repository references.
 
-`ChrisColeTech/qwen-image-edit-uncensored-GGUF`
+## Deploy
 
-This deployment keeps the large model files on the RunPod Network Volume (`/runpod-volume`) instead of baking them into the Docker image.
+- Base Docker image: `runpod/worker-comfyui:5.8.6-base-cuda12.8.1`.
+- Attach a RunPod Network Volume at `/runpod-volume`; allocate **at least 30 GB free** for the new checkpoint, LoRA, partial downloads and reserve. Old Qwen files are not deleted. If they remain on the same volume, increase capacity accordingly or remove them manually after backup.
+- On first real startup, the worker downloads `/runpod-volume/models/checkpoints/flux1-dev-fp8.safetensors` and `/runpod-volume/models/loras/Shar514_Flux-Uncensored-V2.safetensors`. Interrupted downloads resume from `.part` files.
+- `HF_TOKEN` is optional for the Comfy-Org checkpoint and this LoRA, but can help with Hugging Face rate limits. The official `black-forest-labs/FLUX.1-dev` repository is gated; this deployment instead uses Comfy-Org's FP8 ComfyUI checkpoint. Observe the FLUX.1-dev non-commercial license.
+- Hub smoke tests set `USE_MOCK_PIPELINE=1`, so they test the worker without downloading 17+ GB.
 
-## What it does
+## One-image clothes edit
 
-- Base image: `runpod/worker-comfyui:5.8.6-base-cuda12.8.1` (CUDA 12.8 / PyTorch cu128)
-- Installs `city96/ComfyUI-GGUF`
-- Discovers the actual `.gguf` file from the requested Hugging Face repository at worker startup
-- Prefers a Q4_K_M / Q4 quant when the repository contains one
-- Stores the selected transformer as `/runpod-volume/models/diffusion_models/qwen_image_edit_uncensored_q4.gguf`
-- Downloads Qwen2.5-VL text encoder, mmproj, and Qwen Image VAE to the same Network Volume
-- Maps `models/text_encoders` and `models/diffusion_models` into ComfyUI's `clip` and `unet` search paths so the GGUF loader can find the downloaded files
-- Keeps `.runpod/tests.json`; Hub smoke tests set `USE_MOCK_PIPELINE=1` so they do not download model weights
+Send [examples/request-template.json](examples/request-template.json) as the RunPod request. Replace `YOUR_BASE64_IMAGE_HERE` with base64 of **one** input image, and edit node `5`'s `text` prompt. The workflow alone is in [examples/flux-img2img-workflow.json](examples/flux-img2img-workflow.json).
 
-## Network Volume
+The graph loads the source image with `LoadImage`, encodes it with the FLUX VAE, applies the Shar514 LoRA, and samples from the source latent (`denoise: 0.4`). Keep `cfg: 1.0`; FLUX prompt guidance is node `6`. Lower `denoise` toward 0.25 for closer likeness, or raise toward 0.55 for more substantial clothing changes. This is **img2img**, not a dedicated masked garment editor: facial identity cannot be guaranteed by a prompt or denoise setting alone. For exact face preservation, use a garment-only mask and composite the untouched original face, or use a dedicated edit model/workflow.
 
-Attach your RunPod Network Volume to the Serverless endpoint; RunPod mounts it at
-`/runpod-volume`. Allocate **at least 30 GB** for the Q4 transformer (about
-11.7 GB), text encoder (about 4.4 GB), mmproj (about 1.4 GB), VAE, and spare
-space. `containerDiskInGb` does not increase Network Volume capacity. Check
-`df -h /runpod-volume` and `du -sh /runpod-volume/models` on a worker to
-confirm the mount and available space. Increase the volume size if the worker
-reports `Disk quota exceeded`. An interrupted `.part` download resumes after
-you expand the volume.
-
-The first real worker downloads the model files. Later workers reuse them.
-
-## Important workflow note
-
-The repository deliberately does **not** invent a ComfyUI API workflow for this GGUF build. Custom-node names and Qwen Image Edit conditioning nodes change across ComfyUI / ComfyUI-GGUF versions. After deployment, create or import a Qwen Image Edit GGUF workflow in the exact deployed ComfyUI version and export **API Format**. Then send it through worker-comfyui with `input.png` in the `images` array.
-
-`examples/request-template.json` shows the outer RunPod request shape.
+Use approximately 1024-pixel input images to control memory and latency. The first request may take longer because the worker must download and load the models. The 24 GB GPU entries in the Hub config are capacity candidates, not a verified throughput guarantee.
