@@ -1,21 +1,28 @@
-FROM runpod/worker-comfyui:5.8.6-base
+FROM runpod/worker-comfyui:5.8.6
 
 USER root
 
-# Qwen Image Edit GGUF loader
+# Install the GGUF custom node without touching the base torch/CUDA stack.
 RUN git clone --depth 1 https://github.com/city96/ComfyUI-GGUF.git /comfyui/custom_nodes/ComfyUI-GGUF \
-    && pip install --no-cache-dir -r /comfyui/custom_nodes/ComfyUI-GGUF/requirements.txt
+    && if [ -f /comfyui/custom_nodes/ComfyUI-GGUF/requirements.txt ]; then \
+         pip install --no-cache-dir --no-deps -r /comfyui/custom_nodes/ComfyUI-GGUF/requirements.txt || true; \
+       fi
 
-# Used only during image build to fetch models from Hugging Face
-RUN pip install --no-cache-dir huggingface_hub
+COPY scripts/bootstrap_models.py /opt/qwen/bootstrap_models.py
+COPY handler.py /workspace/handler.py
 
-COPY scripts/download_models.py /tmp/download_models.py
-
-# HF_TOKEN is optional for these public repos. If Hugging Face rate-limits the build,
-# add it as a build secret/environment variable in your build environment.
-ARG HF_TOKEN=""
-ENV HF_TOKEN=${HF_TOKEN}
-
-RUN python /tmp/download_models.py
-
-# worker-comfyui base image already contains the RunPod handler/startup.
+# Import hook: for real workers, synchronously prepare model files on the Network Volume
+# before the official worker-comfyui handler starts. Hub smoke tests skip downloads.
+RUN python - <<'PY'
+from pathlib import Path
+p = Path('/usr/local/lib/python3.11/site-packages/sitecustomize.py')
+old = p.read_text() if p.exists() else ''
+block = r'''
+import os, subprocess, sys
+if os.getenv("USE_MOCK_PIPELINE", "0") != "1":
+    script = "/opt/qwen/bootstrap_models.py"
+    if os.path.exists(script):
+        subprocess.run([sys.executable, script], check=True)
+'''
+p.write_text(old + '\n' + block)
+PY

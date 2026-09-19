@@ -1,20 +1,28 @@
 {
   "tests": [
     {
-      "name": "handler_validation",
-      "input": {},
-      "timeout": 30000
+      "name": "smoke_qwen_image_edit",
+      "input": {
+        "workflow": {
+          "1": {
+            "class_type": "EmptyImage",
+            "inputs": {"width": 64, "height": 64, "batch_size": 1, "color": 0}
+          },
+          "2": {
+            "class_type": "SaveImage",
+            "inputs": {"filename_prefix": "hub_smoke", "images": ["1", 0]}
+          }
+        }
+      },
+      "timeout": 300000
     }
   ],
   "config": {
-    "gpuTypeId": "NVIDIA GeForce RTX 4090",
     "gpuCount": 1,
-    "allowedCudaVersions": [
-      "12.8",
-      "12.9",
-      "13.0",
-      "13.1",
-      "13.2"
+    "allowedCudaVersions": ["12.4", "12.5", "12.6", "12.7", "12.8", "12.9", "13.0", "13.1", "13.2", "13.3"],
+    "gpuTypeId": "NVIDIA L4",
+    "env": [
+      {"key": "USE_MOCK_PIPELINE", "value": "1"}
     ]
   }
 }

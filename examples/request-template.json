@@ -1,0 +1,8 @@
+{
+  "input": {
+    "workflow": "EXPORT A VERIFIED COMFYUI API WORKFLOW FOR QWEN IMAGE EDIT GGUF AND PASTE IT HERE",
+    "images": [
+      {"name": "input.png", "image": "YOUR_BASE64_IMAGE_HERE"}
+    ]
+  }
+}

@@ -1,68 +1,29 @@
-[![RunPod](https://api.runpod.io/badge/jiankeong/qwen-image-edit-runpod)](https://console.runpod.io/hub/jiankeong/qwen-image-edit-runpod)
+# Qwen Image Edit Uncensored GGUF — RunPod Serverless
 
-# Qwen Image Edit Uncensored v1.1 GGUF — RunPod Serverless
+Target model repository:
 
-Target diffusion model:
-`ChrisColeTech/qwen-image-edit-uncensored-v1.1-GGUF`
+`ChrisColeTech/qwen-image-edit-uncensored-GGUF`
 
-This project uses:
-- RunPod `worker-comfyui` 5.8.6 base
-- ComfyUI-GGUF
-- the repo's Q4_K_M quant when available (fallbacks are automatic)
-- official Qwen Image FP8 text encoder
-- official Qwen Image VAE
+This deployment keeps the large model files on the RunPod Network Volume (`/runpod-volume`) instead of baking them into the Docker image.
 
-## Deploy — easiest way
+## What it does
 
-1. Create a new GitHub repository.
-2. Upload everything in this folder.
-3. In RunPod: **Serverless → New Endpoint → Start from GitHub Repo**.
-4. Select the repository.
-5. Context path: `/`
-6. Dockerfile path: `Dockerfile`
-7. Start with a GPU with **24 GB+ VRAM**. If you hit OOM, switch to 48 GB.
-8. Active Workers: `0`; Max Workers: `1`; Flash Boot: ON.
-9. Deploy.
+- Base image: `runpod/worker-comfyui:5.8.6`
+- Installs `city96/ComfyUI-GGUF`
+- Discovers the actual `.gguf` file from the requested Hugging Face repository at worker startup
+- Prefers a Q4_K_M / Q4 quant when the repository contains one
+- Stores the selected transformer as `/runpod-volume/models/diffusion_models/qwen_image_edit_uncensored_q4.gguf`
+- Downloads Qwen2.5-VL text encoder, mmproj, and Qwen Image VAE to the same Network Volume
+- Keeps `.runpod/tests.json`; Hub smoke tests set `USE_MOCK_PIPELINE=1` so they do not download model weights
 
-The Docker build downloads the models, so the built image is large. This reduces model-download work when a worker starts.
+## Network Volume
 
-## Test
+Attach your RunPod Network Volume and mount it at `/runpod-volume`.
 
-After deployment:
+The first real worker downloads the model files. Later workers reuse them.
 
-```bash
-curl -X POST "https://api.runpod.ai/v2/YOUR_ENDPOINT_ID/runsync" \
-  -H "Authorization: Bearer YOUR_RUNPOD_API_KEY" \
-  -H "Content-Type: application/json" \
-  --data @examples/test_input.json
-```
+## Important workflow note
 
-By default worker-comfyui returns generated images as base64. Configure S3-compatible storage in RunPod if you want URLs instead.
+The repository deliberately does **not** invent a ComfyUI API workflow for this GGUF build. Custom-node names and Qwen Image Edit conditioning nodes change across ComfyUI / ComfyUI-GGUF versions. After deployment, create or import a Qwen Image Edit GGUF workflow in the exact deployed ComfyUI version and export **API Format**. Then send it through worker-comfyui with `input.png` in the `images` array.
 
-## Use your own image + prompt
-
-The worker-comfyui API expects a ComfyUI API workflow. In `examples/test_input.json`:
-
-- Change node `6` → `inputs.prompt`
-- Change `input.images[0].image` to your image URL or supported image input
-- Keep the uploaded image name as `input.png` because workflow node `1` loads `input.png`
-- Change node `9` for seed/steps/CFG if needed
-
-## Important
-
-The diffusion GGUF repository can change its filenames. `scripts/download_models.py` queries the repository at Docker build time and automatically selects Q4_K_M when present, then renames it to:
-
-`qwen_image_edit_uncensored_q4.gguf`
-
-This keeps the workflow filename stable.
-
-If the model repository later changes architecture incompatibly, the Docker build may still succeed while the workflow needs updating.
-
-
-## RunPod Hub files
-
-This repository includes `.runpod/hub.json`, `.runpod/tests.json`, and a root
-`handler.py` for RunPod Hub validation. The built image itself inherits the
-production handler/startup logic from the official `runpod/worker-comfyui`
-base image; the Dockerfile intentionally does not overwrite it with the
-repository validation stub.
+`examples/request-template.json` shows the outer RunPod request shape.

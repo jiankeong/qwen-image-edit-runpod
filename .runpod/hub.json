@@ -1,20 +1,48 @@
 {
-  "title": "Qwen Image Edit Uncensored v1.1 GGUF",
-  "description": "Qwen Image Edit v1.1 GGUF on ComfyUI-GGUF as a RunPod Serverless endpoint.",
+  "title": "Qwen Image Edit Uncensored GGUF",
+  "description": "Qwen Image Edit uncensored GGUF worker for RunPod Serverless. Weights are cached on a Network Volume at runtime.",
   "type": "serverless",
   "category": "image",
-  "iconUrl": "https://cpjrphpz3t5wbwfe.public.blob.vercel-storage.com/comfy-ui.png",
   "config": {
     "runsOn": "GPU",
-    "containerDiskInGb": 30,
-    "gpuIds": "ADA_24",
+    "containerDiskInGb": 40,
     "gpuCount": 1,
-    "allowedCudaVersions": [
-      "12.8",
-      "12.9",
-      "13.0",
-      "13.1",
-      "13.2"
+    "gpuIds": "ADA_24,AMPERE_24,ADA_48_PRO,AMPERE_48,ADA_80_PRO,AMPERE_80",
+    "allowedCudaVersions": ["12.4", "12.3", "12.2", "12.1", "12.0"],
+    "env": [
+      {
+        "key": "HF_TOKEN",
+        "input": {
+          "name": "Hugging Face access token",
+          "type": "string",
+          "description": "Optional. Helps avoid anonymous Hugging Face rate limits.",
+          "advanced": true
+        }
+      },
+      {
+        "key": "QWEN_HF_REPO",
+        "input": {
+          "name": "Qwen uncensored GGUF repo",
+          "type": "string",
+          "description": "Hugging Face repository containing the uncensored diffusion GGUF.",
+          "default": "ChrisColeTech/qwen-image-edit-uncensored-GGUF",
+          "advanced": true
+        }
+      },
+      {
+        "key": "USE_MOCK_PIPELINE",
+        "input": {
+          "name": "Use mock pipeline (testing only)",
+          "type": "string",
+          "description": "Set to 1 only for RunPod Hub smoke tests. Skips model downloads.",
+          "options": [
+            {"label": "Disabled", "value": "0"},
+            {"label": "Enabled", "value": "1"}
+          ],
+          "default": "0",
+          "advanced": true
+        }
+      }
     ]
   }
 }
