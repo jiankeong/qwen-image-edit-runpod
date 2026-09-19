@@ -114,9 +114,24 @@
     "inputs": {
       "filename_prefix": "flux_clothes_edit",
       "images": [
-        "9",
+        "11",
         0
       ]
+    }
+  },
+  "11": {
+    "class_type": "PreserveOriginalFaces",
+    "inputs": {
+      "original": [
+        "3",
+        0
+      ],
+      "edited": [
+        "9",
+        0
+      ],
+      "minimum_faces": 1,
+      "feather": 0.18
     }
   }
 }
