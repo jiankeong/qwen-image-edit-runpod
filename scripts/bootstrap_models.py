@@ -1,4 +1,5 @@
 import json
+import errno
 import os
 import sys
 import time
@@ -34,13 +35,54 @@ def download(url, dest: Path):
         print(f"[qwen-bootstrap] exists: {dest} ({dest.stat().st_size} bytes)", flush=True)
         return
     tmp = dest.with_suffix(dest.suffix + ".part")
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=120) as src, open(tmp, "wb") as out:
-        while True:
-            chunk = src.read(16 * 1024 * 1024)
-            if not chunk:
-                break
-            out.write(chunk)
+    head = urllib.request.Request(url, headers=headers, method="HEAD")
+    with urllib.request.urlopen(head, timeout=60) as response:
+        size = int(response.headers.get("Content-Length") or 0)
+    offset = tmp.stat().st_size if tmp.exists() else 0
+    if size and offset > size:
+        tmp.unlink()
+        offset = 0
+    if size and offset == size:
+        tmp.replace(dest)
+        return
+
+    request_headers = dict(headers)
+    if offset:
+        request_headers["Range"] = f"bytes={offset}-"
+    req = urllib.request.Request(url, headers=request_headers)
+    with urllib.request.urlopen(req, timeout=120) as src:
+        # Some mirrors ignore Range; restart the partial file only in that case.
+        if offset and src.status != 206:
+            offset = 0
+        free = os.statvfs(tmp.parent)
+        available = free.f_bavail * free.f_frsize
+        remaining = max(0, size - offset) if size else 0
+        reserve = 1024 ** 3
+        if size and available < remaining + reserve:
+            raise RuntimeError(
+                f"Insufficient space on {tmp.parent}: need {remaining + reserve:,} bytes "
+                f"(including 1 GiB reserve), available {available:,}. "
+                "Attach or expand the RunPod Network Volume at /runpod-volume "
+                "(30 GB or more recommended); container disk size is separate. "
+                f"Partial download remains at {tmp}."
+            )
+        try:
+            with open(tmp, "ab" if offset else "wb") as out:
+                while True:
+                    chunk = src.read(16 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+        except OSError as e:
+            if e.errno in (errno.EDQUOT, errno.ENOSPC):
+                raise RuntimeError(
+                    f"Storage quota exhausted at {tmp}; expand the RunPod Network Volume "
+                    "at /runpod-volume to at least 30 GB. The .part file is retained "
+                    "for a resumed download after capacity is increased."
+                ) from e
+            raise
+    if size and tmp.stat().st_size != size:
+        raise RuntimeError(f"Incomplete download {tmp}: {tmp.stat().st_size:,}/{size:,} bytes")
     tmp.replace(dest)
     print(f"[qwen-bootstrap] downloaded: {dest} ({dest.stat().st_size} bytes)", flush=True)
 

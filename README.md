@@ -18,7 +18,14 @@ This deployment keeps the large model files on the RunPod Network Volume (`/runp
 
 ## Network Volume
 
-Attach your RunPod Network Volume and mount it at `/runpod-volume`.
+Attach your RunPod Network Volume to the Serverless endpoint; RunPod mounts it at
+`/runpod-volume`. Allocate **at least 30 GB** for the Q4 transformer (about
+11.7 GB), text encoder (about 4.4 GB), mmproj (about 1.4 GB), VAE, and spare
+space. `containerDiskInGb` does not increase Network Volume capacity. Check
+`df -h /runpod-volume` and `du -sh /runpod-volume/models` on a worker to
+confirm the mount and available space. Increase the volume size if the worker
+reports `Disk quota exceeded`. An interrupted `.part` download resumes after
+you expand the volume.
 
 The first real worker downloads the model files. Later workers reuse them.
 
