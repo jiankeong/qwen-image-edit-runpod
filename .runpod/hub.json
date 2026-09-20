@@ -1,13 +1,13 @@
 {
-  "title": "Qwen Image Edit Rapid AIO v23 NVFP4 GGUF",
-  "description": "One-image Qwen Rapid AIO v23 edit worker using ComfyUI-GGUF and Blackwell CUDA 13.0+.",
+  "title": "Qwen Image Edit Rapid AIO v19 NSFW",
+  "description": "One-image Qwen Rapid AIO v19 NSFW edit worker using the FP8 all-in-one ComfyUI checkpoint.",
   "type": "serverless",
   "category": "image",
   "config": {
     "runsOn": "GPU",
-    "containerDiskInGb": 40,
+    "containerDiskInGb": 60,
     "gpuCount": 1,
-    "gpuIds": "ADA_32_PRO,BLACKWELL_96",
+    "gpuIds": "BLACKWELL_96",
     "allowedCudaVersions": [
       "13.0",
       "13.1",

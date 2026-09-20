@@ -19,9 +19,7 @@ ENV PATH=/opt/venv/bin:$PATH
 RUN pip install --no-cache-dir torch==2.13.0 torchvision==0.28.0 \
       --index-url https://download.pytorch.org/whl/cu130 \
     && git clone --depth 1 https://github.com/Comfy-Org/ComfyUI.git /opt/ComfyUI \
-    && git clone --depth 1 https://github.com/city96/ComfyUI-GGUF.git /opt/ComfyUI/custom_nodes/ComfyUI-GGUF \
     && pip install --no-cache-dir -r /opt/ComfyUI/requirements.txt \
-      -r /opt/ComfyUI/custom_nodes/ComfyUI-GGUF/requirements.txt \
       'runpod>=1.7,<2' 'huggingface-hub>=0.34,<1' \
       'transformers>=4.51,<5' 'hf-xet>=1.1' \
     && pip check

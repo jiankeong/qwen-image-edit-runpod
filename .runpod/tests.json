@@ -1,7 +1,7 @@
 {
   "tests": [
     {
-      "name": "smoke_qwen_rapid_nvfp4_gguf",
+      "name": "smoke_qwen_rapid_v19_nsfw",
       "input": {
         "image": "mock",
         "prompt": "Change the shirt to red",

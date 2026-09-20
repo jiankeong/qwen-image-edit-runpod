@@ -1,4 +1,4 @@
-"""Install GGUF assets from persistent cache, with bounded ephemeral fallback."""
+"""Install the v19 AIO checkpoint from persistent cache or container disk."""
 
 import os
 import shutil
@@ -6,11 +6,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from handler import BASE_REPO, CLIP_FILE, DIFFUSION_FILE, VAE_FILE, storage_quota_message
+from handler import BASE_REPO, CHECKPOINT_FILE, CHECKPOINT_PATH, storage_quota_message
 
 GIB = 1024 ** 3
-# Asset size plus temporary-download headroom. The model files total about 16 GB.
-MIN_FREE_GIB = {DIFFUSION_FILE: 14, "text_encoder/" + CLIP_FILE: 6, "vae/" + VAE_FILE: 2}
+# The 28.4 GB checkpoint needs room for the download and filesystem overhead.
+MIN_FREE_GIB = {CHECKPOINT_PATH: 35}
 EPHEMERAL_CACHE = Path(os.getenv("QWEN_EPHEMERAL_CACHE", "/tmp/qwen-hf-cache"))
 
 
@@ -46,9 +46,7 @@ def run_download(remote, cache, *, ephemeral=False, local_only=False):
 
 def install_models(base=Path("/opt/ComfyUI/models"), downloader=run_download):
     assets = (
-        (DIFFUSION_FILE, base / "diffusion_models" / DIFFUSION_FILE),
-        ("text_encoder/" + CLIP_FILE, base / "text_encoders" / CLIP_FILE),
-        ("vae/" + VAE_FILE, base / "vae" / VAE_FILE),
+        (CHECKPOINT_PATH, base / "checkpoints" / CHECKPOINT_FILE),
     )
     volume_cache = Path(os.environ["HF_HUB_CACHE"])
     volume_cache.mkdir(parents=True, exist_ok=True)

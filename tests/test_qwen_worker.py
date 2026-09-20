@@ -24,53 +24,55 @@ class WorkerTests(unittest.TestCase):
         self.assertTrue(bootstrap_models.quota_error(
             OSError('I/O error: IO Error: Disk quota exceeded (os error 122)')))
 
-    def test_cached_diffusion_survives_low_volume_and_other_assets_fall_back(self):
+    def test_cached_checkpoint_survives_low_volume(self):
         with __import__('tempfile').TemporaryDirectory() as directory:
             from pathlib import Path
             root = Path(directory)
             cache = root / 'volume' / 'hf-cache'
             ephemeral = root / 'ephemeral'
-            cached_model = cache / 'diffusion.gguf'
+            cached_model = cache / 'v19-checkpoint.safetensors'
             cache.mkdir(parents=True)
             cached_model.write_bytes(b'model')
             calls = []
 
             def download(remote, location, *, ephemeral=False, local_only=False):
                 calls.append((remote, ephemeral, local_only))
-                if remote == handler.DIFFUSION_FILE and local_only:
+                if remote == handler.CHECKPOINT_PATH and local_only:
                     return cached_model
                 if local_only:
                     raise RuntimeError('cache miss')
-                if not ephemeral:
-                    self.fail('low-volume asset should not be downloaded to Network Volume')
-                target = Path(location) / Path(remote).name
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(b'model')
-                return target
+                self.fail('cached checkpoint should not be downloaded again')
 
             fake_usage = lambda path: SimpleNamespace(free=20 * bootstrap_models.GIB if Path(path) == ephemeral else 0)
             with patch.dict(os.environ, {'HF_HUB_CACHE': str(cache)}), \
                  patch.object(bootstrap_models, 'EPHEMERAL_CACHE', ephemeral), \
                  patch.object(bootstrap_models.shutil, 'disk_usage', side_effect=fake_usage):
                 bootstrap_models.install_models(base=root / 'models', downloader=download)
-            self.assertEqual((root / 'models/diffusion_models' / handler.DIFFUSION_FILE).resolve(), cached_model.resolve())
-            self.assertTrue((root / 'models/text_encoders' / handler.CLIP_FILE).is_file())
-            self.assertTrue((root / 'models/vae' / handler.VAE_FILE).is_file())
-            self.assertNotIn((handler.DIFFUSION_FILE, True, False), calls)
+            self.assertEqual((root / 'models/checkpoints' / handler.CHECKPOINT_FILE).resolve(), cached_model.resolve())
+            self.assertEqual(calls, [(handler.CHECKPOINT_PATH, False, True)])
 
-    def test_workflow_uses_exact_gguf_components(self):
+    def test_workflow_uses_v19_aio_checkpoint(self):
         graph = handler.build_workflow('source.png', 'red jacket', ' ', 4, 1.0, 1.0, 7)
-        self.assertEqual(graph['2']['class_type'], 'CLIPLoaderGGUF')
-        self.assertEqual(graph['2']['inputs']['clip_name'], 'text_encoder-NVFP4.gguf')
-        self.assertEqual(graph['4']['class_type'], 'UnetLoaderGGUF')
-        self.assertEqual(graph['4']['inputs']['unet_name'], 'qwen-v23-diffusion-NVFP4.gguf')
-        self.assertEqual(graph['3']['inputs']['vae_name'], 'vae.safetensors')
+        self.assertEqual(graph['2']['class_type'], 'CheckpointLoaderSimple')
+        self.assertEqual(graph['2']['inputs']['ckpt_name'], 'Qwen-Rapid-AIO-NSFW-v19.safetensors')
         self.assertEqual(graph['5']['class_type'], 'TextEncodeQwenImageEditPlus')
+        self.assertEqual(graph['5']['inputs']['clip'], ['2', 1])
+        self.assertEqual(graph['5']['inputs']['vae'], ['2', 2])
         self.assertEqual(graph['1']['inputs']['image'], 'source.png')
+        self.assertEqual(graph['8']['inputs']['model'], ['2', 0])
+        self.assertEqual(graph['7']['class_type'], 'EmptyLatentImage')
+        self.assertEqual(graph['7']['inputs']['width'], 1024)
+        self.assertEqual(graph['8']['inputs']['sampler_name'], 'euler_ancestral')
+        self.assertEqual(graph['8']['inputs']['scheduler'], 'beta')
         self.assertEqual(graph['8']['inputs']['steps'], 4)
         self.assertEqual(graph['8']['inputs']['cfg'], 1.0)
         self.assertEqual(graph['8']['inputs']['denoise'], 1.0)
         self.assertEqual(graph['8']['inputs']['seed'], 7)
+
+    def test_lower_strength_uses_source_latent(self):
+        graph = handler.build_workflow('source.png', 'red jacket', ' ', 8, 1.0, 0.5, 7, 768, 1024)
+        self.assertEqual(graph['7']['class_type'], 'VAEEncode')
+        self.assertEqual(graph['8']['inputs']['denoise'], 0.5)
 
     def test_defaults_and_single_image(self):
         pipe = Mock(return_value=SimpleNamespace(images=[Image.new('RGB', (16, 16), (200, 100, 50))]))
@@ -122,4 +124,22 @@ class WorkerTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'workflow validation'):
                     handler.run_comfy_edit(image=Image.new('RGB', (16, 16)), prompt='edit', negative_prompt=' ',
                                            num_inference_steps=4, guidance_scale=1.0, strength=1.0, seed=0)
+            self.assertEqual(os.listdir(directory), [])
+
+    def test_comfy_prompt_ack_with_empty_node_errors_is_success(self):
+        prompt_id = 'b3571018-2815-42cc-917f-073529861538'
+        ack = {'prompt_id': prompt_id, 'number': 0, 'node_errors': {}}
+        history = {prompt_id: {'status': {'status_str': 'success'},
+                               'outputs': {'10': {'images': [{'filename': 'edited.png'}]}}}}
+        output = io.BytesIO()
+        Image.new('RGB', (16, 16), (200, 100, 50)).save(output, format='PNG')
+        with __import__('tempfile').TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {'COMFY_INPUT_DIR': directory}), \
+                 patch.object(handler, 'comfy_json', side_effect=[ack, history]), \
+                 patch.object(handler.urllib.request, 'urlopen', return_value=io.BytesIO(output.getvalue())):
+                result = handler.run_comfy_edit(image=Image.new('RGB', (16, 16)),
+                                                prompt='edit', negative_prompt=' ',
+                                                num_inference_steps=4, guidance_scale=1.0,
+                                                strength=1.0, seed=0)
+            self.assertEqual(result.images[0].getpixel((0, 0)), (200, 100, 50))
             self.assertEqual(os.listdir(directory), [])

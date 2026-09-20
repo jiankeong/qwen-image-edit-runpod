@@ -1,4 +1,4 @@
-"""RunPod worker: one-image Qwen Rapid AIO NVFP4 GGUF editing via ComfyUI."""
+"""RunPod worker: one-image Qwen Rapid AIO v19 NSFW editing via ComfyUI."""
 
 import base64
 import errno
@@ -17,10 +17,9 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageOps
 
-BASE_REPO = "FreedomAISVR/Qwen-Image-Edit-Rapid-AIO-NSFW-v23-NVFP4-GGUF"
-DIFFUSION_FILE = "qwen-v23-diffusion-NVFP4.gguf"
-CLIP_FILE = "text_encoder-NVFP4.gguf"
-VAE_FILE = "vae.safetensors"
+BASE_REPO = "Phr00t/Qwen-Image-Edit-Rapid-AIO"
+CHECKPOINT_PATH = "v19/Qwen-Rapid-AIO-NSFW-v19.safetensors"
+CHECKPOINT_FILE = "Qwen-Rapid-AIO-NSFW-v19.safetensors"
 COMFY_URL = os.getenv("COMFY_URL", "http://127.0.0.1:8188")
 PARSER_REPO = "mattmdjaga/segformer_b2_clothes"
 CACHE_DIR = Path(os.getenv("RUNPOD_VOLUME_PATH", "/runpod-volume")) / "hf-cache"
@@ -39,7 +38,7 @@ def storage_quota_message(path):
         f"Model download exhausted storage at {path}; Network Volume "
         f"{volume}: {usage.free / gib:.1f} GiB free / "
         f"{usage.total / gib:.1f} GiB total. "
-        "The three GGUF/VAE assets total about 16 GB; reserve at least 35 GB free "
+        "The v19 AIO checkpoint is 28.4 GB; reserve at least 40 GB free "
         "for the model, parser and download overhead. "
         "Expand the Network Volume or remove old "
         "model/cache files after checking what they contain. "
@@ -81,7 +80,7 @@ def encode_image(image):
 
 
 def prepare_image_for_pipeline(image):
-    """Bound SDXL inference size without changing the source used for compositing."""
+    """Bound Qwen inference size without changing the source used for compositing."""
     prepared = image.copy()
     prepared.thumbnail((1536, 1536), Image.Resampling.LANCZOS)
     if prepared.width * prepared.height > 1_500_000:
@@ -143,23 +142,25 @@ def comfy_json(path, body=None):
         return json.load(reply)
 
 
-def build_workflow(image_name, prompt, negative_prompt, steps, cfg, strength, seed):
-    """ComfyUI API graph using the GGUF loaders, not a Diffusers checkpoint."""
+def build_workflow(image_name, prompt, negative_prompt, steps, cfg, strength, seed,
+                   width=1024, height=1024):
+    """ComfyUI API graph using the v19 all-in-one checkpoint."""
     return {
         "1": {"class_type": "LoadImage", "inputs": {"image": image_name}},
-        "2": {"class_type": "CLIPLoaderGGUF", "inputs": {"clip_name": CLIP_FILE, "type": "qwen_image"}},
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": VAE_FILE}},
-        "4": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": DIFFUSION_FILE}},
+        "2": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": CHECKPOINT_FILE}},
         "5": {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {
-            "clip": ["2", 0], "vae": ["3", 0], "image1": ["1", 0], "prompt": prompt}},
+            "clip": ["2", 1], "vae": ["2", 2], "image1": ["1", 0], "prompt": prompt}},
         "6": {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {
-            "clip": ["2", 0], "vae": ["3", 0], "image1": ["1", 0], "prompt": negative_prompt}},
-        "7": {"class_type": "VAEEncode", "inputs": {"pixels": ["1", 0], "vae": ["3", 0]}},
+            "clip": ["2", 1], "vae": ["2", 2], "image1": ["1", 0], "prompt": negative_prompt}},
+        "7": ({"class_type": "EmptyLatentImage", "inputs": {
+            "width": width, "height": height, "batch_size": 1}}
+              if strength == 1.0 else
+              {"class_type": "VAEEncode", "inputs": {"pixels": ["1", 0], "vae": ["2", 2]}}),
         "8": {"class_type": "KSampler", "inputs": {
-            "model": ["4", 0], "seed": seed, "steps": steps, "cfg": cfg,
-            "sampler_name": "euler", "scheduler": "simple", "positive": ["5", 0],
+            "model": ["2", 0], "seed": seed, "steps": steps, "cfg": cfg,
+            "sampler_name": "euler_ancestral", "scheduler": "beta", "positive": ["5", 0],
             "negative": ["6", 0], "latent_image": ["7", 0], "denoise": strength}},
-        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["2", 2]}},
         "10": {"class_type": "SaveImage", "inputs": {
             "images": ["9", 0], "filename_prefix": "qwen_rapid_edit"}},
     }
@@ -179,9 +180,9 @@ def run_comfy_edit(*, image, prompt, negative_prompt, num_inference_steps,
     image.save(input_path, format="PNG")
     try:
         workflow = build_workflow(name, prompt, negative_prompt, num_inference_steps,
-                                  guidance_scale, strength, seed)
+                                  guidance_scale, strength, seed, image.width, image.height)
         queued = comfy_json("/prompt", {"prompt": workflow, "client_id": uuid.uuid4().hex})
-        if "error" in queued or "node_errors" in queued:
+        if queued.get("error") or queued.get("node_errors"):
             raise RuntimeError(f"ComfyUI workflow validation: {queued}")
         prompt_id = queued["prompt_id"]
         deadline = time.monotonic() + int(os.getenv("COMFY_TIMEOUT_SECONDS", "900"))

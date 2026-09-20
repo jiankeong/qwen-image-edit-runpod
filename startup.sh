@@ -22,7 +22,7 @@ else:
 import json
 with urllib.request.urlopen('http://127.0.0.1:8188/object_info', timeout=30) as response:
     info = json.load(response)
-for node in ('UnetLoaderGGUF', 'CLIPLoaderGGUF', 'TextEncodeQwenImageEditPlus'):
+for node in ('CheckpointLoaderSimple', 'TextEncodeQwenImageEditPlus'):
     if node not in info:
         raise RuntimeError(f'ComfyUI missing required node: {node}')
 PY
