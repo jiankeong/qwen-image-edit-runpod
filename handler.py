@@ -21,6 +21,21 @@ _PARSER = None
 _PROCESSOR = None
 
 
+def configure_offload(pipe, free_vram_gib, mode="auto"):
+    """Avoid moving the 40.9 GB transformer as one piece onto a 24 GB GPU."""
+    if mode not in ("auto", "model", "sequential"):
+        raise ValueError("QWEN_OFFLOAD_MODE must be auto, model, or sequential")
+    selected = "sequential" if mode == "auto" and free_vram_gib < 48 else mode
+    if selected == "auto":
+        selected = "model"
+    if selected == "sequential":
+        pipe.enable_sequential_cpu_offload()
+    else:
+        pipe.enable_model_cpu_offload()
+    print(f"[qwen-worker] GPU free={free_vram_gib:.1f} GiB; offload={selected}", flush=True)
+    return selected
+
+
 def storage_quota_message(path):
     """Report the actual filesystem capacity rather than hiding errno 122."""
     volume = Path(os.getenv("RUNPOD_VOLUME_PATH", "/runpod-volume"))
@@ -127,7 +142,11 @@ def get_pipeline():
             if exc.errno not in (errno.ENOSPC, errno.EDQUOT, 122):
                 raise
             raise RuntimeError(storage_quota_message(CACHE_DIR)) from exc
-        pipe.enable_model_cpu_offload()
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA GPU is required for Qwen-Image-Edit-2511 inference")
+        free_vram_gib = torch.cuda.mem_get_info()[0] / (1024 ** 3)
+        configure_offload(pipe, free_vram_gib, os.getenv("QWEN_OFFLOAD_MODE", "auto"))
+        pipe.enable_vae_tiling()
         _PIPELINE = pipe
     return _PIPELINE
 

@@ -23,4 +23,8 @@ Expand the volume or deliberately remove obsolete checkpoints/caches until at le
 
 Local tests cover request validation and exact outside-mask pixel preservation. Container build, GPU model loading, mask quality and RunPod image output still require a deployed test.
 
+### GPU memory
+
+`enable_model_cpu_offload()` still moves the entire 40.9 GB transformer onto the GPU during denoising, so a 24 GB GPU fails even if model loading succeeds. The worker now selects **sequential CPU offload** when less than 48 GiB of GPU memory is free; it also enables VAE tiling. This avoids the whole-transformer transfer but is much slower and may exceed the endpoint timeout. For dependable throughput, use a GPU with around **80 GB VRAM**. `QWEN_OFFLOAD_MODE=model|sequential|auto` can override the automatic choice; `auto` is the default. Allocator fragmentation settings cannot make a 40.9 GB component fit in 24 GB VRAM.
+
 The Docker build pins Diffusers 0.37.0, Transformers 4.x and `huggingface-hub<1.0` in one resolver transaction. It imports the Qwen and SegFormer classes and runs `pip check` before the image is published, preventing the earlier `huggingface-hub==1.32.0` runtime import error.

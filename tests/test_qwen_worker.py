@@ -15,6 +15,23 @@ import handler
 
 
 class QwenWorkerTests(unittest.TestCase):
+    def test_offload_selects_sequential_for_24gb_gpu(self):
+        pipe = SimpleNamespace(
+            enable_sequential_cpu_offload=unittest.mock.Mock(),
+            enable_model_cpu_offload=unittest.mock.Mock(),
+        )
+        self.assertEqual(handler.configure_offload(pipe, 23.5), 'sequential')
+        pipe.enable_sequential_cpu_offload.assert_called_once_with()
+        pipe.enable_model_cpu_offload.assert_not_called()
+
+    def test_offload_selects_model_for_large_gpu(self):
+        pipe = SimpleNamespace(
+            enable_sequential_cpu_offload=unittest.mock.Mock(),
+            enable_model_cpu_offload=unittest.mock.Mock(),
+        )
+        self.assertEqual(handler.configure_offload(pipe, 79.0), 'model')
+        pipe.enable_model_cpu_offload.assert_called_once_with()
+
     def test_target_inference(self):
         self.assertEqual(handler.choose_target('把衣服换成蓝色'), 'clothes')
         self.assertEqual(handler.choose_target('换成海边风景'), 'background')
