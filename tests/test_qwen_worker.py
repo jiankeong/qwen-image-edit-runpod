@@ -9,6 +9,7 @@ import numpy as np
 from PIL import Image
 
 import handler
+import bootstrap_models
 
 
 def encoded_image(color=(10, 20, 30)):
@@ -19,6 +20,44 @@ def encoded_image(color=(10, 20, 30)):
 
 
 class WorkerTests(unittest.TestCase):
+    def test_quota_text_is_detected_even_without_errno(self):
+        self.assertTrue(bootstrap_models.quota_error(
+            OSError('I/O error: IO Error: Disk quota exceeded (os error 122)')))
+
+    def test_cached_diffusion_survives_low_volume_and_other_assets_fall_back(self):
+        with __import__('tempfile').TemporaryDirectory() as directory:
+            from pathlib import Path
+            root = Path(directory)
+            cache = root / 'volume' / 'hf-cache'
+            ephemeral = root / 'ephemeral'
+            cached_model = cache / 'diffusion.gguf'
+            cache.mkdir(parents=True)
+            cached_model.write_bytes(b'model')
+            calls = []
+
+            def download(remote, location, *, ephemeral=False, local_only=False):
+                calls.append((remote, ephemeral, local_only))
+                if remote == handler.DIFFUSION_FILE and local_only:
+                    return cached_model
+                if local_only:
+                    raise RuntimeError('cache miss')
+                if not ephemeral:
+                    self.fail('low-volume asset should not be downloaded to Network Volume')
+                target = Path(location) / Path(remote).name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(b'model')
+                return target
+
+            fake_usage = lambda path: SimpleNamespace(free=20 * bootstrap_models.GIB if Path(path) == ephemeral else 0)
+            with patch.dict(os.environ, {'HF_HUB_CACHE': str(cache)}), \
+                 patch.object(bootstrap_models, 'EPHEMERAL_CACHE', ephemeral), \
+                 patch.object(bootstrap_models.shutil, 'disk_usage', side_effect=fake_usage):
+                bootstrap_models.install_models(base=root / 'models', downloader=download)
+            self.assertEqual((root / 'models/diffusion_models' / handler.DIFFUSION_FILE).resolve(), cached_model.resolve())
+            self.assertTrue((root / 'models/text_encoders' / handler.CLIP_FILE).is_file())
+            self.assertTrue((root / 'models/vae' / handler.VAE_FILE).is_file())
+            self.assertNotIn((handler.DIFFUSION_FILE, True, False), calls)
+
     def test_workflow_uses_exact_gguf_components(self):
         graph = handler.build_workflow('source.png', 'red jacket', ' ', 4, 1.0, 1.0, 7)
         self.assertEqual(graph['2']['class_type'], 'CLIPLoaderGGUF')
