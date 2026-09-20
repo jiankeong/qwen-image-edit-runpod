@@ -1,0 +1,8 @@
+{
+  "input": {
+    "image": "YOUR_BASE64_IMAGE_HERE",
+    "prompt": "Describe the complete desired edit here.",
+    "output_mode": "raw",
+    "steps": 40
+  }
+}

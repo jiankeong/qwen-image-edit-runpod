@@ -69,7 +69,7 @@ class QwenWorkerTests(unittest.TestCase):
         with patch.object(handler, 'parser_labels', return_value=labels), patch.object(handler, 'get_pipeline', return_value=fake_pipeline):
             response = handler.handler({'input': {
                 'image': base64.b64encode(buffer.getvalue()).decode(),
-                'prompt': 'Change the shirt to red', 'edit_target': 'clothes'
+                'prompt': 'Change the shirt to red', 'edit_target': 'clothes', 'output_mode': 'masked'
             }})
         result = Image.open(io.BytesIO(base64.b64decode(response['image'])))
         self.assertEqual(result.getpixel((0, 0)), (200, 100, 50))
@@ -89,12 +89,34 @@ class QwenWorkerTests(unittest.TestCase):
              patch.object(handler, 'get_pipeline', return_value=fake_pipeline):
             response = handler.handler({'input': {
                 'image': base64.b64encode(buffer.getvalue()).decode(),
-                'prompt': 'Change the shirt', 'edit_target': 'clothes', 'return_raw': True,
+                'prompt': 'Change the shirt', 'edit_target': 'clothes', 'output_mode': 'masked', 'return_raw': True,
             }})
         final = Image.open(io.BytesIO(base64.b64decode(response['image'])))
         raw = Image.open(io.BytesIO(base64.b64decode(response['raw_image'])))
         self.assertEqual(final.getpixel((0, 15)), (10, 20, 30))
         self.assertEqual(raw.getpixel((0, 15)), (200, 100, 50))
+
+    def test_raw_mode_returns_full_lora_output_without_parser(self):
+        image = Image.new('RGB', (16, 16), (10, 20, 30))
+        buffer = io.BytesIO()
+        image.save(buffer, format='PNG')
+        generated = Image.new('RGB', (16, 16), (200, 100, 50))
+        fake_pipeline = lambda **kwargs: SimpleNamespace(images=[generated])
+        with patch.object(handler, 'parser_labels') as parser, \
+             patch.object(handler, 'get_pipeline', return_value=fake_pipeline):
+            response = handler.handler({'input': {
+                'image': base64.b64encode(buffer.getvalue()).decode(),
+                'prompt': 'Transform the image',
+            }})
+        parser.assert_not_called()
+        output = Image.open(io.BytesIO(base64.b64decode(response['image'])))
+        self.assertEqual(output.getpixel((0, 15)), (200, 100, 50))
+        self.assertEqual(response['output_mode'], 'raw')
+        self.assertEqual(response['edit_target'], 'full')
+
+    def test_invalid_output_mode_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'output_mode'):
+            handler.handler({'input': {'prompt': 'edit', 'output_mode': 'invalid'}})
 
     def test_mock_pipeline_skips_download(self):
         with patch.dict(os.environ, {'USE_MOCK_PIPELINE': '1'}):

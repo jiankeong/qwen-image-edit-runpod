@@ -2,6 +2,7 @@
   "input": {
     "image": "YOUR_BASE64_IMAGE_HERE",
     "prompt": "Change only the shirt to a dark blue jacket. Keep all other details unchanged.",
+    "output_mode": "masked",
     "edit_target": "clothes",
     "steps": 40
   }

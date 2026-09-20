@@ -158,18 +158,24 @@ def handler(event):
     prompt = payload.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("input.prompt must be a nonempty string")
-    target = choose_target(prompt, payload.get("edit_target", "auto"))
+    output_mode = payload.get("output_mode", "raw")
+    if output_mode not in ("raw", "masked"):
+        raise ValueError("output_mode must be raw or masked")
     original = decode_image(payload.get("image"))
-    labels = parser_labels(original)
-    mask = make_mask(labels, target)
+    if output_mode == "masked":
+        target = choose_target(prompt, payload.get("edit_target", "auto"))
+        labels = parser_labels(original)
+        mask = make_mask(labels, target)
+    else:
+        target = "full"
     generated = get_pipeline()(
         image=[original], prompt=prompt, negative_prompt=" ",
         num_inference_steps=int(payload.get("steps", 40)),
         true_cfg_scale=4.0, guidance_scale=1.0, num_images_per_prompt=1,
     ).images[0]
-    result = composite_exact(original, generated, mask)
-    response = {"image": encode_image(result), "format": "png", "edit_target": target, "model": BASE_REPO, "lora": LORA_REPO}
-    if payload.get("return_raw") is True:
+    result = composite_exact(original, generated, mask) if output_mode == "masked" else generated
+    response = {"image": encode_image(result), "format": "png", "output_mode": output_mode, "edit_target": target, "model": BASE_REPO, "lora": LORA_REPO}
+    if output_mode == "masked" and payload.get("return_raw") is True:
         response["raw_image"] = encode_image(generated)
     return response
 

@@ -4,11 +4,13 @@ This worker uses the [seochan99/Qwen-Image-Edit-2511-bnb-nf4](https://huggingfac
 
 ## One uploaded image, targeted output
 
-Send [examples/request-template.json](examples/request-template.json). Replace `YOUR_BASE64_IMAGE_HERE` with one PNG/JPEG image encoded as base64. Set `prompt` and `edit_target` to `clothes` or `background`; `auto` infers the target from Chinese/English keywords and fails if ambiguous.
+Send [examples/raw-edit-request.json](examples/raw-edit-request.json) when the full LoRA-generated image is the goal. Replace `YOUR_BASE64_IMAGE_HERE` with one PNG/JPEG image encoded as base64 and set the prompt to the desired transformation. The default `output_mode` is `raw`: `image` is the complete Qwen + LoRA output, without garment/background masking. This can also change identity and other image details. This edit pipeline still requires one input image.
 
-The worker runs Qwen image editing on the source image, segments the source with [mattmdjaga/segformer_b2_clothes](https://huggingface.co/mattmdjaga/segformer_b2_clothes), then **copies every original pixel outside the selected region** into the final PNG. Clothes mode selects garment labels; background mode selects the background label. The target region is still synthesized and the border may be imperfect. Segmentation errors can select the wrong region. A pixel-equality check verifies that all unselected pixels remain unchanged.
+For exact preservation outside garments or background, send [examples/request-template.json](examples/request-template.json) with `"output_mode": "masked"`. Set `edit_target` to `clothes` or `background`; `auto` infers the target from Chinese/English keywords and fails if ambiguous.
 
-If the expected LoRA effect seems absent, send the same request with `"return_raw": true`. The response then includes `raw_image` (the unmasked Qwen + LoRA result) alongside `image` (the usual target-only composite), without a second inference. If `raw_image` shows the effect and `image` does not, the garment/background mask removed it; if both lack it, inspect the prompt, loaded LoRA repository and NF4 quantization rather than changing the mask. The default response and face-preserving composite are unchanged.
+In `masked` mode, the worker runs Qwen image editing on the source image, segments the source with [mattmdjaga/segformer_b2_clothes](https://huggingface.co/mattmdjaga/segformer_b2_clothes), then **copies every original pixel outside the selected region** into the final PNG. Clothes mode selects garment labels; background mode selects the background label. The target region is still synthesized and the border may be imperfect. Segmentation errors can select the wrong region. A pixel-equality check verifies that all unselected pixels remain unchanged.
+
+If the expected LoRA effect seems absent in `masked` mode, send the same request with `"return_raw": true`. The response then includes `raw_image` (the unmasked Qwen + LoRA result) alongside `image` (the target-only composite), without a second inference. If `raw_image` shows the effect and `image` does not, the garment/background mask removed it; if both lack it, inspect the prompt, loaded LoRA repository and NF4 quantization rather than changing the mask.
 
 ## Deployment
 
