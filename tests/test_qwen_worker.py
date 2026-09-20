@@ -75,6 +75,26 @@ class QwenWorkerTests(unittest.TestCase):
         self.assertEqual(result.getpixel((0, 0)), (200, 100, 50))
         self.assertEqual(result.getpixel((0, 15)), (10, 20, 30))
         self.assertEqual(response['edit_target'], 'clothes')
+        self.assertNotIn('raw_image', response)
+
+    def test_raw_output_exposes_unmasked_lora_result(self):
+        image = Image.new('RGB', (16, 16), (10, 20, 30))
+        buffer = io.BytesIO()
+        image.save(buffer, format='PNG')
+        labels = np.zeros((16, 16), dtype=np.int64)
+        labels[:8] = 4
+        generated = Image.new('RGB', (16, 16), (200, 100, 50))
+        fake_pipeline = lambda **kwargs: SimpleNamespace(images=[generated])
+        with patch.object(handler, 'parser_labels', return_value=labels), \
+             patch.object(handler, 'get_pipeline', return_value=fake_pipeline):
+            response = handler.handler({'input': {
+                'image': base64.b64encode(buffer.getvalue()).decode(),
+                'prompt': 'Change the shirt', 'edit_target': 'clothes', 'return_raw': True,
+            }})
+        final = Image.open(io.BytesIO(base64.b64decode(response['image'])))
+        raw = Image.open(io.BytesIO(base64.b64decode(response['raw_image'])))
+        self.assertEqual(final.getpixel((0, 15)), (10, 20, 30))
+        self.assertEqual(raw.getpixel((0, 15)), (200, 100, 50))
 
     def test_mock_pipeline_skips_download(self):
         with patch.dict(os.environ, {'USE_MOCK_PIPELINE': '1'}):

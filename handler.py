@@ -168,7 +168,10 @@ def handler(event):
         true_cfg_scale=4.0, guidance_scale=1.0, num_images_per_prompt=1,
     ).images[0]
     result = composite_exact(original, generated, mask)
-    return {"image": encode_image(result), "format": "png", "edit_target": target, "model": BASE_REPO, "lora": LORA_REPO}
+    response = {"image": encode_image(result), "format": "png", "edit_target": target, "model": BASE_REPO, "lora": LORA_REPO}
+    if payload.get("return_raw") is True:
+        response["raw_image"] = encode_image(generated)
+    return response
 
 
 if __name__ == "__main__":

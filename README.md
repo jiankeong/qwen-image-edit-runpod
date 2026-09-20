@@ -8,6 +8,8 @@ Send [examples/request-template.json](examples/request-template.json). Replace `
 
 The worker runs Qwen image editing on the source image, segments the source with [mattmdjaga/segformer_b2_clothes](https://huggingface.co/mattmdjaga/segformer_b2_clothes), then **copies every original pixel outside the selected region** into the final PNG. Clothes mode selects garment labels; background mode selects the background label. The target region is still synthesized and the border may be imperfect. Segmentation errors can select the wrong region. A pixel-equality check verifies that all unselected pixels remain unchanged.
 
+If the expected LoRA effect seems absent, send the same request with `"return_raw": true`. The response then includes `raw_image` (the unmasked Qwen + LoRA result) alongside `image` (the usual target-only composite), without a second inference. If `raw_image` shows the effect and `image` does not, the garment/background mask removed it; if both lack it, inspect the prompt, loaded LoRA repository and NF4 quantization rather than changing the mask. The default response and face-preserving composite are unchanged.
+
 ## Deployment
 
 Attach a Network Volume at `/runpod-volume`; the Hub model cache, Xet cache and temporary downloads are all directed there. Allocate at least **35 GB free** for the 18 GB NF4 base, LoRA, parser and downloads; previous BF16 files are not removed automatically. Start testing on a **24 GB GPU** with one request at a time. The model author reports approximately 17 GB VRAM for the quantized base on an RTX 4090; LoRA, image resolution and runtime overhead may push the total higher. `USE_MOCK_PIPELINE=1` skips model loading in Hub smoke tests. `HF_TOKEN` can help with download rate limits.
