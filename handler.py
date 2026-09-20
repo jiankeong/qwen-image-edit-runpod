@@ -3,6 +3,7 @@
 import base64
 import errno
 import io
+import math
 import os
 import re
 import shutil
@@ -166,6 +167,9 @@ def handler(event):
     output_mode = payload.get("output_mode", "raw")
     if output_mode not in ("raw", "masked"):
         raise ValueError("output_mode must be raw or masked")
+    true_cfg_scale = payload.get("true_cfg_scale", 4.0)
+    if isinstance(true_cfg_scale, bool) or not isinstance(true_cfg_scale, (int, float)) or not math.isfinite(true_cfg_scale) or true_cfg_scale <= 0:
+        raise ValueError("input.true_cfg_scale must be a positive finite number")
     original = decode_image(payload.get("image"))
     if output_mode == "masked":
         target = choose_target(prompt, payload.get("edit_target", "auto"))
@@ -174,9 +178,9 @@ def handler(event):
     else:
         target = "full"
     generated = get_pipeline()(
-        image=original, prompt=prompt, negative_prompt=" ",
+        image=original, prompt=prompt, negative_prompt=" " if true_cfg_scale > 1 else None,
         num_inference_steps=int(payload.get("steps", 40)),
-        true_cfg_scale=4.0,
+        true_cfg_scale=float(true_cfg_scale),
     ).images[0]
     result = composite_exact(original, generated, mask) if output_mode == "masked" else generated
     response = {"image": encode_image(result), "format": "png", "output_mode": output_mode, "edit_target": target, "model": BASE_REPO, "lora": LORA_REPO}

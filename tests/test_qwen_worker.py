@@ -123,6 +123,25 @@ class QwenWorkerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'output_mode'):
             handler.handler({'input': {'prompt': 'edit', 'output_mode': 'invalid'}})
 
+    def test_input_true_cfg_scale_overrides_default(self):
+        image = Image.new('RGB', (16, 16), (10, 20, 30))
+        buffer = io.BytesIO()
+        image.save(buffer, format='PNG')
+        encoded = base64.b64encode(buffer.getvalue()).decode()
+        fake_pipeline = unittest.mock.Mock(return_value=SimpleNamespace(images=[image]))
+        with patch.object(handler, 'get_pipeline', return_value=fake_pipeline):
+            handler.handler({'input': {'image': encoded, 'prompt': 'edit', 'true_cfg_scale': 2.5}})
+            self.assertEqual(fake_pipeline.call_args.kwargs['true_cfg_scale'], 2.5)
+            self.assertEqual(fake_pipeline.call_args.kwargs['negative_prompt'], ' ')
+            handler.handler({'input': {'image': encoded, 'prompt': 'edit', 'true_cfg_scale': 1.0}})
+            self.assertEqual(fake_pipeline.call_args.kwargs['true_cfg_scale'], 1.0)
+            self.assertIsNone(fake_pipeline.call_args.kwargs['negative_prompt'])
+
+    def test_invalid_true_cfg_scale_is_rejected(self):
+        for value in (0, -1, True, '4', float('nan'), float('inf')):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'true_cfg_scale'):
+                handler.handler({'input': {'prompt': 'edit', 'true_cfg_scale': value}})
+
     def test_mock_pipeline_skips_download(self):
         with patch.dict(os.environ, {'USE_MOCK_PIPELINE': '1'}):
             result = handler.handler({'input': {'image': 'mock'}})
