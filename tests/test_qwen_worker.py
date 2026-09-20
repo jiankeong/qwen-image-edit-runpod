@@ -15,7 +15,7 @@ import handler
 
 
 class QwenWorkerTests(unittest.TestCase):
-    def test_nf4_auto_offload_selects_model_for_24gb_gpu(self):
+    def test_auto_offload_selects_model_on_small_gpu(self):
         pipe = SimpleNamespace(
             enable_sequential_cpu_offload=unittest.mock.Mock(),
             enable_model_cpu_offload=unittest.mock.Mock(),
@@ -84,7 +84,7 @@ class QwenWorkerTests(unittest.TestCase):
         labels = np.zeros((16, 16), dtype=np.int64)
         labels[:8] = 4
         generated = Image.new('RGB', (16, 16), (200, 100, 50))
-        fake_pipeline = lambda **kwargs: SimpleNamespace(images=[generated])
+        fake_pipeline = unittest.mock.Mock(return_value=SimpleNamespace(images=[generated]))
         with patch.object(handler, 'parser_labels', return_value=labels), \
              patch.object(handler, 'get_pipeline', return_value=fake_pipeline):
             response = handler.handler({'input': {
@@ -101,7 +101,7 @@ class QwenWorkerTests(unittest.TestCase):
         buffer = io.BytesIO()
         image.save(buffer, format='PNG')
         generated = Image.new('RGB', (16, 16), (200, 100, 50))
-        fake_pipeline = lambda **kwargs: SimpleNamespace(images=[generated])
+        fake_pipeline = unittest.mock.Mock(return_value=SimpleNamespace(images=[generated]))
         with patch.object(handler, 'parser_labels') as parser, \
              patch.object(handler, 'get_pipeline', return_value=fake_pipeline):
             response = handler.handler({'input': {
@@ -113,6 +113,11 @@ class QwenWorkerTests(unittest.TestCase):
         self.assertEqual(output.getpixel((0, 15)), (200, 100, 50))
         self.assertEqual(response['output_mode'], 'raw')
         self.assertEqual(response['edit_target'], 'full')
+        self.assertIsInstance(fake_pipeline.call_args.kwargs['image'], Image.Image)
+        self.assertEqual(fake_pipeline.call_args.kwargs['num_inference_steps'], 40)
+        self.assertEqual(fake_pipeline.call_args.kwargs['true_cfg_scale'], 4.0)
+        self.assertEqual(fake_pipeline.call_args.kwargs['negative_prompt'], ' ')
+        self.assertNotIn('guidance_scale', fake_pipeline.call_args.kwargs)
 
     def test_invalid_output_mode_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'output_mode'):
@@ -128,7 +133,7 @@ class QwenWorkerTests(unittest.TestCase):
             with patch.dict(os.environ, {'RUNPOD_VOLUME_PATH': volume}):
                 message = handler.storage_quota_message(os.path.join(volume, 'hf-cache'))
         self.assertIn('GiB free', message)
-        self.assertIn('35 GB free', message)
+        self.assertIn('60 GB free', message)
         self.assertIn('df -h', message)
 
     def test_pipeline_download_quota_has_actionable_error(self):
@@ -145,12 +150,12 @@ class QwenWorkerTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'Expand the Network Volume'):
                     handler.get_pipeline()
 
-    def test_pipeline_loads_nf4_base_then_requested_lora(self):
+    def test_pipeline_loads_full_base_and_activates_named_lora(self):
         pipe = SimpleNamespace(
             load_lora_weights=unittest.mock.Mock(),
+            set_adapters=unittest.mock.Mock(),
             enable_model_cpu_offload=unittest.mock.Mock(),
             enable_sequential_cpu_offload=unittest.mock.Mock(),
-            vae=SimpleNamespace(enable_tiling=unittest.mock.Mock()),
         )
         load_base = unittest.mock.Mock(return_value=pipe)
         fake_diffusers = SimpleNamespace(QwenImageEditPlusPipeline=SimpleNamespace(from_pretrained=load_base))
@@ -164,10 +169,12 @@ class QwenWorkerTests(unittest.TestCase):
                  patch.object(handler, '_PIPELINE', None), \
                  patch.dict(os.environ, {'QWEN_OFFLOAD_MODE': 'auto'}):
                 self.assertIs(handler.get_pipeline(), pipe)
-        self.assertEqual(load_base.call_args.args[0], 'seochan99/Qwen-Image-Edit-2511-bnb-nf4')
+        self.assertEqual(load_base.call_args.args[0], 'toandev/Qwen-Image-Edit-2511-4bit')
         self.assertEqual(pipe.load_lora_weights.call_args.args[0], handler.LORA_REPO)
+        self.assertEqual(pipe.load_lora_weights.call_args.kwargs['weight_name'], 'qwen-image-edit-plus-nsfw-lora.safetensors')
+        self.assertEqual(pipe.load_lora_weights.call_args.kwargs['adapter_name'], 'mcnl-nsfw-v1')
+        pipe.set_adapters.assert_called_once_with(['mcnl-nsfw-v1'])
         pipe.enable_model_cpu_offload.assert_called_once_with()
-        pipe.vae.enable_tiling.assert_called_once_with()
 
 
 if __name__ == '__main__':

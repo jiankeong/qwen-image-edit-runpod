@@ -11,8 +11,10 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageOps
 
-BASE_REPO = "seochan99/Qwen-Image-Edit-2511-bnb-nf4"
+BASE_REPO = "toandev/Qwen-Image-Edit-2511-4bit"
 LORA_REPO = os.getenv("QWEN_LORA_REPO", "ScottzillaSystems/qwen-image-edit-plus-nsfw-lora")
+LORA_WEIGHT_NAME = "qwen-image-edit-plus-nsfw-lora.safetensors"
+LORA_ADAPTER_NAME = "mcnl-nsfw-v1"
 PARSER_REPO = "mattmdjaga/segformer_b2_clothes"
 CACHE_DIR = Path(os.getenv("RUNPOD_VOLUME_PATH", "/runpod-volume")) / "hf-cache"
 CLOTHES_LABELS = (4, 5, 6, 7, 8, 17)
@@ -22,7 +24,7 @@ _PROCESSOR = None
 
 
 def configure_offload(pipe, free_vram_gib, mode="auto"):
-    """The NF4 transformer fits in 24 GB; offload whole components for speed."""
+    """Offload the quantized Qwen components while retaining a fast model path."""
     if mode not in ("auto", "model", "sequential"):
         raise ValueError("QWEN_OFFLOAD_MODE must be auto, model, or sequential")
     selected = "model" if mode == "auto" else mode
@@ -43,7 +45,7 @@ def storage_quota_message(path):
         f"Model download exhausted storage at {path}; Network Volume "
         f"{volume}: {usage.free / gib:.1f} GiB free / "
         f"{usage.total / gib:.1f} GiB total. "
-        "The NF4 base is about 18 GB on disk; reserve at least 35 GB free "
+        "The mixed-precision NF4 base is about 22 GB on disk; reserve at least 60 GB free "
         "for the base, LoRA, parser and download overhead. "
         "Expand the Network Volume or remove old "
         "model/cache files after checking what they contain. "
@@ -137,7 +139,11 @@ def get_pipeline():
         try:
             pipe = QwenImageEditPlusPipeline.from_pretrained(BASE_REPO, torch_dtype=torch.bfloat16, cache_dir=str(CACHE_DIR), token=token)
             print(f"[qwen-worker] loading LoRA={LORA_REPO}", flush=True)
-            pipe.load_lora_weights(LORA_REPO, cache_dir=str(CACHE_DIR), token=token)
+            pipe.load_lora_weights(
+                LORA_REPO, weight_name=LORA_WEIGHT_NAME, adapter_name=LORA_ADAPTER_NAME,
+                cache_dir=str(CACHE_DIR), token=token,
+            )
+            pipe.set_adapters([LORA_ADAPTER_NAME])
         except OSError as exc:
             if exc.errno not in (errno.ENOSPC, errno.EDQUOT, 122):
                 raise
@@ -145,7 +151,6 @@ def get_pipeline():
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA GPU is required for Qwen-Image-Edit-2511 inference")
         free_vram_gib = torch.cuda.mem_get_info()[0] / (1024 ** 3)
-        pipe.vae.enable_tiling()
         configure_offload(pipe, free_vram_gib, os.getenv("QWEN_OFFLOAD_MODE", "auto"))
         _PIPELINE = pipe
     return _PIPELINE
@@ -169,9 +174,9 @@ def handler(event):
     else:
         target = "full"
     generated = get_pipeline()(
-        image=[original], prompt=prompt, negative_prompt=" ",
+        image=original, prompt=prompt, negative_prompt=" ",
         num_inference_steps=int(payload.get("steps", 40)),
-        true_cfg_scale=4.0, guidance_scale=1.0, num_images_per_prompt=1,
+        true_cfg_scale=4.0,
     ).images[0]
     result = composite_exact(original, generated, mask) if output_mode == "masked" else generated
     response = {"image": encode_image(result), "format": "png", "output_mode": output_mode, "edit_target": target, "model": BASE_REPO, "lora": LORA_REPO}

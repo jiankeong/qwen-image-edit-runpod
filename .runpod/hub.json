@@ -1,6 +1,6 @@
 {
   "title": "Qwen Image Edit 2511 + NSFW LoRA",
-  "description": "One-image targeted editing using NF4 Qwen-Image-Edit-2511 and ScottzillaSystems NSFW LoRA; untouched pixels copied from source.",
+  "description": "Mixed-precision NF4 Qwen-Image-Edit-2511 with explicitly activated ScottzillaSystems LoRA; raw or target-only output.",
   "type": "serverless",
   "category": "image",
   "config": {
