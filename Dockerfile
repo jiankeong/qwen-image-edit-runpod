@@ -6,8 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HF_HOME=/runpod-volume/hf-home \
     HF_HUB_CACHE=/runpod-volume/hf-cache \
     HF_XET_CACHE=/runpod-volume/hf-home/xet \
-    HF_XET_CHUNK_CACHE_SIZE_BYTES=0 \
-    TMPDIR=/runpod-volume/tmp
+    HF_XET_CHUNK_CACHE_SIZE_BYTES=0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 python3-venv python3-pip git ca-certificates \
@@ -26,6 +25,9 @@ RUN pip install --no-cache-dir torch==2.13.0 torchvision==0.28.0 \
       'runpod>=1.7,<2' 'huggingface-hub>=0.34,<1' \
       'transformers>=4.51,<5' 'hf-xet>=1.1' \
     && pip check
+
+# The Network Volume is mounted only at runtime; dpkg/pip need /tmp while building.
+ENV TMPDIR=/runpod-volume/tmp
 
 COPY handler.py /workspace/handler.py
 COPY bootstrap_models.py /workspace/bootstrap_models.py

@@ -27,6 +27,7 @@ class DependencyContractTests(unittest.TestCase):
         self.assertNotIn('AutoPipelineForImage2Image', docker)
         for setting in ('HF_HOME=/runpod-volume/hf-home', 'HF_HUB_CACHE=/runpod-volume/hf-cache', 'TMPDIR=/runpod-volume/tmp'):
             self.assertIn(setting, docker)
+        self.assertGreater(docker.index('ENV TMPDIR=/runpod-volume/tmp'), docker.index('pip check'))
 
     def test_three_exact_assets(self):
         bootstrap = (ROOT / 'bootstrap_models.py').read_text()
