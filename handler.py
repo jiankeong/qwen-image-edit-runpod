@@ -145,8 +145,8 @@ def get_pipeline():
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA GPU is required for Qwen-Image-Edit-2511 inference")
         free_vram_gib = torch.cuda.mem_get_info()[0] / (1024 ** 3)
+        pipe.vae.enable_tiling()
         configure_offload(pipe, free_vram_gib, os.getenv("QWEN_OFFLOAD_MODE", "auto"))
-        pipe.enable_vae_tiling()
         _PIPELINE = pipe
     return _PIPELINE
 

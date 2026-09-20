@@ -25,6 +25,6 @@ Local tests cover request validation and exact outside-mask pixel preservation. 
 
 ### GPU memory
 
-The NF4 base uses **model CPU offload** by default, including on 24 GB GPUs, and enables VAE tiling. This avoids the very slow sequential offload used for the previous BF16 base. `QWEN_OFFLOAD_MODE=model|sequential|auto` can override it; `auto` selects `model`. If a large image still causes OOM, try `sequential` or a higher-VRAM GPU. The specific NF4 + LoRA pair and image quality still need live RunPod verification.
+The NF4 base uses **model CPU offload** by default, including on 24 GB GPUs, and enables tiling on the VAE component (`pipe.vae.enable_tiling()`). This avoids the very slow sequential offload used for the previous BF16 base. `QWEN_OFFLOAD_MODE=model|sequential|auto` can override it; `auto` selects `model`. If a large image still causes OOM, try `sequential` or a higher-VRAM GPU. The specific NF4 + LoRA pair and image quality still need live RunPod verification.
 
 The Docker build pins Diffusers 0.37.0, Transformers 4.x, `huggingface-hub<1.0` and installs BitsAndBytes in one resolver transaction. It imports the Qwen and SegFormer classes and runs `pip check` before the image is published, preventing the earlier `huggingface-hub==1.32.0` runtime import error.

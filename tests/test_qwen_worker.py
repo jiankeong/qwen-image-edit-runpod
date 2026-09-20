@@ -108,7 +108,7 @@ class QwenWorkerTests(unittest.TestCase):
             load_lora_weights=unittest.mock.Mock(),
             enable_model_cpu_offload=unittest.mock.Mock(),
             enable_sequential_cpu_offload=unittest.mock.Mock(),
-            enable_vae_tiling=unittest.mock.Mock(),
+            vae=SimpleNamespace(enable_tiling=unittest.mock.Mock()),
         )
         load_base = unittest.mock.Mock(return_value=pipe)
         fake_diffusers = SimpleNamespace(QwenImageEditPlusPipeline=SimpleNamespace(from_pretrained=load_base))
@@ -125,7 +125,7 @@ class QwenWorkerTests(unittest.TestCase):
         self.assertEqual(load_base.call_args.args[0], 'seochan99/Qwen-Image-Edit-2511-bnb-nf4')
         self.assertEqual(pipe.load_lora_weights.call_args.args[0], handler.LORA_REPO)
         pipe.enable_model_cpu_offload.assert_called_once_with()
-        pipe.enable_vae_tiling.assert_called_once_with()
+        pipe.vae.enable_tiling.assert_called_once_with()
 
 
 if __name__ == '__main__':
