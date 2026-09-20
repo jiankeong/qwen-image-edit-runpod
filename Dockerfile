@@ -6,10 +6,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HF_HOME=/runpod-volume/hf-home \
     HF_HUB_CACHE=/runpod-volume/hf-cache \
     HF_XET_CACHE=/runpod-volume/hf-home/xet \
-    HF_XET_CHUNK_CACHE_SIZE_BYTES=0
+    HF_XET_CHUNK_CACHE_SIZE_BYTES=0 \
+    CC=/usr/bin/gcc
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 python3-venv python3-pip git ca-certificates \
+      python3 python3-venv python3-pip python3-dev build-essential git ca-certificates \
       libgl1 libglib2.0-0 libgomp1 \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/venv
