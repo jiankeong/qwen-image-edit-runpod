@@ -1,28 +1,33 @@
-FROM runpod/worker-comfyui:5.8.6-base-cuda12.8.1
+FROM nvidia/cuda:13.2.0-cudnn-runtime-ubuntu24.04
 
-USER root
-
-# Hub and hf-xet read these at import time. Keep every download/cache on the
-# mounted Network Volume instead of the small writable container layer.
-ENV HF_HOME=/runpod-volume/hf-home \
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/runpod-volume/hf-home \
     HF_HUB_CACHE=/runpod-volume/hf-cache \
     HF_XET_CACHE=/runpod-volume/hf-home/xet \
     HF_XET_CHUNK_CACHE_SIZE_BYTES=0 \
     TMPDIR=/runpod-volume/tmp
 
-# Resolve the full HF stack together. Transformers 4.x requires hub<1.0;
-# installing Diffusers main separately previously upgraded hub to 1.x.
-RUN pip install --no-cache-dir \
-      'runpod>=1.7' \
-      'diffusers==0.37.0' \
-      'transformers>=4.51,<5' \
-      'huggingface-hub>=0.34,<1.0' \
-      'accelerate>=1.5' \
-      'peft>=0.17' \
-      'bitsandbytes>=0.46,<1' \
-    && python -c "import huggingface_hub, transformers, diffusers; from transformers import AutoImageProcessor, SegformerForSemanticSegmentation; from diffusers import QwenImageEditPlusPipeline; assert int(huggingface_hub.__version__.split('.')[0]) == 0; print('HF_IMPORT_OK hub=' + huggingface_hub.__version__ + ' transformers=' + transformers.__version__ + ' diffusers=' + diffusers.__version__)" \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 python3-venv python3-pip git ca-certificates \
+      libgl1 libglib2.0-0 libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+
+# CUDA 13.2 wheels are needed for the NVFP4 Blackwell checkpoint.
+RUN pip install --no-cache-dir torch==2.13.0 torchvision==0.28.0 \
+      --index-url https://download.pytorch.org/whl/cu132 \
+    && git clone --depth 1 https://github.com/Comfy-Org/ComfyUI.git /opt/ComfyUI \
+    && git clone --depth 1 https://github.com/city96/ComfyUI-GGUF.git /opt/ComfyUI/custom_nodes/ComfyUI-GGUF \
+    && pip install --no-cache-dir -r /opt/ComfyUI/requirements.txt \
+      -r /opt/ComfyUI/custom_nodes/ComfyUI-GGUF/requirements.txt \
+      'runpod>=1.7,<2' 'huggingface-hub>=0.34,<1' \
+      'transformers>=4.51,<5' 'hf-xet>=1.1' \
     && pip check
 
 COPY handler.py /workspace/handler.py
+COPY bootstrap_models.py /workspace/bootstrap_models.py
 COPY startup.sh /workspace/startup.sh
 CMD ["sh", "/workspace/startup.sh"]

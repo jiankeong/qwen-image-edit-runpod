@@ -1,49 +1,40 @@
-import unittest
 import json
+import unittest
 from pathlib import Path
 
-from packaging.requirements import Requirement
-
 ROOT = Path(__file__).resolve().parents[1]
+MODEL = 'FreedomAISVR/Qwen-Image-Edit-Rapid-AIO-NSFW-v23-NVFP4-GGUF'
 
 
 class DependencyContractTests(unittest.TestCase):
-    def test_default_lora_matches_runpod_manifest(self):
-        manifest = json.loads((ROOT / '.runpod/hub.json').read_text())
-        env = {item['key']: item['input'] for item in manifest['config']['env']}
-        self.assertEqual(env['QWEN_LORA_REPO']['default'], 'ScottzillaSystems/qwen-image-edit-plus-nsfw-lora')
-        self.assertIn('ScottzillaSystems/qwen-image-edit-plus-nsfw-lora', (ROOT / 'handler.py').read_text())
-        self.assertIn('BASE_REPO = "toandev/Qwen-Image-Edit-2511-4bit"', (ROOT / 'handler.py').read_text())
-        self.assertIn('ADA_24', manifest['config']['gpuIds'])
+    def test_model_manifest_and_blackwell(self):
+        hub = json.loads((ROOT / '.runpod/hub.json').read_text())
+        smoke = json.loads((ROOT / '.runpod/tests.json').read_text())
+        self.assertIn('Qwen Image Edit Rapid AIO', hub['title'])
+        self.assertIn('ADA_32_PRO', hub['config']['gpuIds'])
+        self.assertNotIn('ADA_24', hub['config']['gpuIds'])
+        self.assertEqual(smoke['config']['gpuTypeId'], 'NVIDIA GeForce RTX 5090')
+        self.assertEqual(hub['config']['allowedCudaVersions'], ['13.2', '13.3'])
+        self.assertIn(MODEL, (ROOT / 'handler.py').read_text())
+        self.assertNotIn('stablediffusionapi/ultraepicairealism-v10', (ROOT / 'handler.py').read_text())
 
-    def test_single_compatible_hf_install(self):
-        dockerfile = (ROOT / 'Dockerfile').read_text()
-        self.assertEqual(dockerfile.count('pip install'), 1)
-        self.assertIn("'diffusers==0.37.0'", dockerfile)
-        self.assertIn("'transformers>=4.51,<5'", dockerfile)
-        self.assertIn("'huggingface-hub>=0.34,<1.0'", dockerfile)
-        self.assertIn("'bitsandbytes>=0.46,<1'", dockerfile)
-        self.assertNotIn('git+https://github.com/huggingface/diffusers', dockerfile)
-        self.assertIn('QwenImageEditPlusPipeline', dockerfile)
-        self.assertIn('SegformerForSemanticSegmentation', dockerfile)
-        self.assertIn('pip check', dockerfile)
-        hub = Requirement('huggingface-hub>=0.34,<1.0')
-        self.assertIn('0.36.0', hub.specifier)
-        self.assertNotIn('1.32.0', hub.specifier)
+    def test_cuda13_comfy_gguf_stack(self):
+        docker = (ROOT / 'Dockerfile').read_text()
+        self.assertIn('nvidia/cuda:13.2.0-cudnn-runtime-ubuntu24.04', docker)
+        self.assertIn('https://download.pytorch.org/whl/cu132', docker)
+        self.assertIn('city96/ComfyUI-GGUF', docker)
+        self.assertIn('Comfy-Org/ComfyUI', docker)
+        self.assertNotIn('AutoPipelineForImage2Image', docker)
+        for setting in ('HF_HOME=/runpod-volume/hf-home', 'HF_HUB_CACHE=/runpod-volume/hf-cache', 'TMPDIR=/runpod-volume/tmp'):
+            self.assertIn(setting, docker)
 
-    def test_hub_and_xet_caches_use_network_volume(self):
-        dockerfile = (ROOT / 'Dockerfile').read_text()
-        startup = (ROOT / 'startup.sh').read_text()
-        for setting in (
-            'HF_HOME=/runpod-volume/hf-home',
-            'HF_HUB_CACHE=/runpod-volume/hf-cache',
-            'HF_XET_CACHE=/runpod-volume/hf-home/xet',
-            'TMPDIR=/runpod-volume/tmp',
-        ):
-            self.assertIn(setting, dockerfile)
-        self.assertIn('mkdir -p "$HF_HOME" "$HF_HUB_CACHE" "$HF_XET_CACHE" "$TMPDIR"', startup)
-        self.assertIn('COPY startup.sh /workspace/startup.sh', dockerfile)
-
-
-if __name__ == '__main__':
-    unittest.main()
+    def test_three_exact_assets(self):
+        bootstrap = (ROOT / 'bootstrap_models.py').read_text()
+        handler = (ROOT / 'handler.py').read_text()
+        self.assertIn('qwen-v23-diffusion-NVFP4.gguf', handler)
+        self.assertIn('text_encoder-NVFP4.gguf', handler)
+        self.assertIn('vae.safetensors', handler)
+        self.assertIn('hf_hub_download', bootstrap)
+        self.assertIn('link.symlink_to(downloaded)', bootstrap)
+        self.assertIn('diffusion_models', bootstrap)
+        self.assertIn('text_encoders', bootstrap)

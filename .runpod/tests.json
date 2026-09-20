@@ -1,7 +1,7 @@
 {
   "tests": [
     {
-      "name": "smoke_qwen_2511_edit",
+      "name": "smoke_qwen_rapid_nvfp4_gguf",
       "input": {
         "image": "mock",
         "prompt": "Change the shirt to red",
@@ -13,14 +13,10 @@
   "config": {
     "gpuCount": 1,
     "allowedCudaVersions": [
-      "12.8",
-      "12.9",
-      "13.0",
-      "13.1",
       "13.2",
       "13.3"
     ],
-    "gpuTypeId": "NVIDIA L4",
+    "gpuTypeId": "NVIDIA GeForce RTX 5090",
     "env": [
       {
         "key": "USE_MOCK_PIPELINE",

@@ -1,4 +1,4 @@
-"""RunPod worker: Qwen-Image-Edit-2511 + NSFW LoRA, with target-only pixels."""
+"""RunPod worker: one-image Qwen Rapid AIO NVFP4 GGUF editing via ComfyUI."""
 
 import base64
 import errno
@@ -7,34 +7,27 @@ import math
 import os
 import re
 import shutil
+import json
+import time
+import urllib.request
+import urllib.parse
+import uuid
 from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageOps
 
-BASE_REPO = "toandev/Qwen-Image-Edit-2511-4bit"
-LORA_REPO = os.getenv("QWEN_LORA_REPO", "ScottzillaSystems/qwen-image-edit-plus-nsfw-lora")
-LORA_WEIGHT_NAME = "qwen-image-edit-plus-nsfw-lora.safetensors"
-LORA_ADAPTER_NAME = "mcnl-nsfw-v1"
+BASE_REPO = "FreedomAISVR/Qwen-Image-Edit-Rapid-AIO-NSFW-v23-NVFP4-GGUF"
+DIFFUSION_FILE = "qwen-v23-diffusion-NVFP4.gguf"
+CLIP_FILE = "text_encoder-NVFP4.gguf"
+VAE_FILE = "vae.safetensors"
+COMFY_URL = os.getenv("COMFY_URL", "http://127.0.0.1:8188")
 PARSER_REPO = "mattmdjaga/segformer_b2_clothes"
 CACHE_DIR = Path(os.getenv("RUNPOD_VOLUME_PATH", "/runpod-volume")) / "hf-cache"
 CLOTHES_LABELS = (4, 5, 6, 7, 8, 17)
 _PIPELINE = None
 _PARSER = None
 _PROCESSOR = None
-
-
-def configure_offload(pipe, free_vram_gib, mode="auto"):
-    """Offload the quantized Qwen components while retaining a fast model path."""
-    if mode not in ("auto", "model", "sequential"):
-        raise ValueError("QWEN_OFFLOAD_MODE must be auto, model, or sequential")
-    selected = "model" if mode == "auto" else mode
-    if selected == "sequential":
-        pipe.enable_sequential_cpu_offload()
-    else:
-        pipe.enable_model_cpu_offload()
-    print(f"[qwen-worker] GPU free={free_vram_gib:.1f} GiB; offload={selected}", flush=True)
-    return selected
 
 
 def storage_quota_message(path):
@@ -46,8 +39,8 @@ def storage_quota_message(path):
         f"Model download exhausted storage at {path}; Network Volume "
         f"{volume}: {usage.free / gib:.1f} GiB free / "
         f"{usage.total / gib:.1f} GiB total. "
-        "The mixed-precision NF4 base is about 22 GB on disk; reserve at least 60 GB free "
-        "for the base, LoRA, parser and download overhead. "
+        "The three GGUF/VAE assets total about 16 GB; reserve at least 35 GB free "
+        "for the model, parser and download overhead. "
         "Expand the Network Volume or remove old "
         "model/cache files after checking what they contain. "
         f"Inspect with: df -h {volume}; du -sh {volume}/hf-cache "
@@ -85,6 +78,19 @@ def encode_image(image):
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def prepare_image_for_pipeline(image):
+    """Bound SDXL inference size without changing the source used for compositing."""
+    prepared = image.copy()
+    prepared.thumbnail((1536, 1536), Image.Resampling.LANCZOS)
+    if prepared.width * prepared.height > 1_500_000:
+        scale = math.sqrt(1_500_000 / (prepared.width * prepared.height))
+        prepared = prepared.resize(
+            (max(8, int(prepared.width * scale) // 8 * 8), max(8, int(prepared.height * scale) // 8 * 8)),
+            Image.Resampling.LANCZOS,
+        )
+    return prepared
 
 
 def parser_labels(image):
@@ -129,47 +135,104 @@ def composite_exact(original, edited, mask):
     return Image.fromarray(output_pixels, mode="RGB")
 
 
-def get_pipeline():
-    global _PIPELINE
-    if _PIPELINE is None:
-        import torch
-        from diffusers import QwenImageEditPlusPipeline
+def comfy_json(path, body=None):
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(COMFY_URL + path, data=data,
+                                 headers={"Content-Type": "application/json"} if data else {})
+    with urllib.request.urlopen(req, timeout=30) as reply:
+        return json.load(reply)
 
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        token = os.getenv("HF_TOKEN") or None
-        try:
-            pipe = QwenImageEditPlusPipeline.from_pretrained(BASE_REPO, torch_dtype=torch.bfloat16, cache_dir=str(CACHE_DIR), token=token)
-            print(f"[qwen-worker] loading LoRA={LORA_REPO}", flush=True)
-            pipe.load_lora_weights(
-                LORA_REPO, weight_name=LORA_WEIGHT_NAME, adapter_name=LORA_ADAPTER_NAME,
-                cache_dir=str(CACHE_DIR), token=token,
-            )
-            pipe.set_adapters([LORA_ADAPTER_NAME])
-        except OSError as exc:
-            if exc.errno not in (errno.ENOSPC, errno.EDQUOT, 122):
-                raise
-            raise RuntimeError(storage_quota_message(CACHE_DIR)) from exc
-        if not torch.cuda.is_available():
-            raise RuntimeError("CUDA GPU is required for Qwen-Image-Edit-2511 inference")
-        free_vram_gib = torch.cuda.mem_get_info()[0] / (1024 ** 3)
-        configure_offload(pipe, free_vram_gib, os.getenv("QWEN_OFFLOAD_MODE", "auto"))
-        _PIPELINE = pipe
-    return _PIPELINE
+
+def build_workflow(image_name, prompt, negative_prompt, steps, cfg, strength, seed):
+    """ComfyUI API graph using the GGUF loaders, not a Diffusers checkpoint."""
+    return {
+        "1": {"class_type": "LoadImage", "inputs": {"image": image_name}},
+        "2": {"class_type": "CLIPLoaderGGUF", "inputs": {"clip_name": CLIP_FILE, "type": "qwen_image"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": VAE_FILE}},
+        "4": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": DIFFUSION_FILE}},
+        "5": {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {
+            "clip": ["2", 0], "vae": ["3", 0], "image1": ["1", 0], "prompt": prompt}},
+        "6": {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {
+            "clip": ["2", 0], "vae": ["3", 0], "image1": ["1", 0], "prompt": negative_prompt}},
+        "7": {"class_type": "VAEEncode", "inputs": {"pixels": ["1", 0], "vae": ["3", 0]}},
+        "8": {"class_type": "KSampler", "inputs": {
+            "model": ["4", 0], "seed": seed, "steps": steps, "cfg": cfg,
+            "sampler_name": "euler", "scheduler": "simple", "positive": ["5", 0],
+            "negative": ["6", 0], "latent_image": ["7", 0], "denoise": strength}},
+        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["8", 0], "vae": ["3", 0]}},
+        "10": {"class_type": "SaveImage", "inputs": {
+            "images": ["9", 0], "filename_prefix": "qwen_rapid_edit"}},
+    }
+
+
+def get_pipeline():
+    """Keep a callable interface for local tests and the one-image handler."""
+    return run_comfy_edit
+
+
+def run_comfy_edit(*, image, prompt, negative_prompt, num_inference_steps,
+                   guidance_scale, strength, seed):
+    input_dir = Path(os.getenv("COMFY_INPUT_DIR", "/opt/ComfyUI/input"))
+    name = f"runpod_{uuid.uuid4().hex}.png"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    input_path = input_dir / name
+    image.save(input_path, format="PNG")
+    try:
+        workflow = build_workflow(name, prompt, negative_prompt, num_inference_steps,
+                                  guidance_scale, strength, seed)
+        queued = comfy_json("/prompt", {"prompt": workflow, "client_id": uuid.uuid4().hex})
+        if "error" in queued or "node_errors" in queued:
+            raise RuntimeError(f"ComfyUI workflow validation: {queued}")
+        prompt_id = queued["prompt_id"]
+        deadline = time.monotonic() + int(os.getenv("COMFY_TIMEOUT_SECONDS", "900"))
+        while time.monotonic() < deadline:
+            history = comfy_json("/history/" + urllib.parse.quote(prompt_id, safe=""))
+            if prompt_id in history:
+                entry = history[prompt_id]
+                if entry.get("status", {}).get("status_str") == "error":
+                    raise RuntimeError(f"ComfyUI execution failed: {entry.get('status')}")
+                images = entry.get("outputs", {}).get("10", {}).get("images", [])
+                if images:
+                    info = images[0]
+                    query = urllib.parse.urlencode({"filename": info["filename"],
+                                                    "subfolder": info.get("subfolder", ""),
+                                                    "type": info.get("type", "output")})
+                    with urllib.request.urlopen(COMFY_URL + "/view?" + query, timeout=30) as reply:
+                        with Image.open(io.BytesIO(reply.read())) as result:
+                            return type("Output", (), {"images": [result.convert("RGB")]})()
+            time.sleep(1)
+        raise TimeoutError(f"ComfyUI prompt {prompt_id} exceeded timeout")
+    finally:
+        input_path.unlink(missing_ok=True)
 
 
 def handler(event):
     payload = event.get("input", event)
     if os.getenv("USE_MOCK_PIPELINE") == "1":
-        return {"ok": True, "mode": "mock", "model": BASE_REPO, "lora": LORA_REPO}
+        return {"ok": True, "mode": "mock", "model": BASE_REPO}
     prompt = payload.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("input.prompt must be a nonempty string")
     output_mode = payload.get("output_mode", "raw")
     if output_mode not in ("raw", "masked"):
         raise ValueError("output_mode must be raw or masked")
-    true_cfg_scale = payload.get("true_cfg_scale", 4.0)
-    if isinstance(true_cfg_scale, bool) or not isinstance(true_cfg_scale, (int, float)) or not math.isfinite(true_cfg_scale) or true_cfg_scale <= 0:
-        raise ValueError("input.true_cfg_scale must be a positive finite number")
+    guidance_scale = payload.get("guidance_scale", payload.get("true_cfg_scale", 1.0))
+    strength = payload.get("strength", 1.0)
+    steps = payload.get("steps", 4)
+    if isinstance(guidance_scale, bool) or not isinstance(guidance_scale, (int, float)) or not math.isfinite(guidance_scale) or guidance_scale <= 0:
+        raise ValueError("input.guidance_scale must be a positive finite number")
+    if isinstance(strength, bool) or not isinstance(strength, (int, float)) or not math.isfinite(strength) or not 0 < strength <= 1:
+        raise ValueError("input.strength must be between 0 and 1")
+    if isinstance(steps, bool) or not isinstance(steps, int) or not 1 <= steps <= 100:
+        raise ValueError("input.steps must be an integer between 1 and 100")
+    if steps * strength < 1:
+        raise ValueError("input.steps * input.strength must be at least 1")
+    negative_prompt = payload.get("negative_prompt", " ")
+    if not isinstance(negative_prompt, str):
+        raise ValueError("input.negative_prompt must be a string")
+    seed = payload.get("seed", 0)
+    if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2 ** 64:
+        raise ValueError("input.seed must be an unsigned 64-bit integer")
     original = decode_image(payload.get("image"))
     if output_mode == "masked":
         target = choose_target(prompt, payload.get("edit_target", "auto"))
@@ -178,12 +241,13 @@ def handler(event):
     else:
         target = "full"
     generated = get_pipeline()(
-        image=original, prompt=prompt, negative_prompt=" " if true_cfg_scale > 1 else None,
-        num_inference_steps=int(payload.get("steps", 40)),
-        true_cfg_scale=float(true_cfg_scale),
+        image=prepare_image_for_pipeline(original), prompt=prompt,
+        negative_prompt=negative_prompt,
+        num_inference_steps=steps, guidance_scale=float(guidance_scale), strength=float(strength),
+        seed=seed,
     ).images[0]
     result = composite_exact(original, generated, mask) if output_mode == "masked" else generated
-    response = {"image": encode_image(result), "format": "png", "output_mode": output_mode, "edit_target": target, "model": BASE_REPO, "lora": LORA_REPO}
+    response = {"image": encode_image(result), "format": "png", "output_mode": output_mode, "edit_target": target, "model": BASE_REPO}
     if output_mode == "masked" and payload.get("return_raw") is True:
         response["raw_image"] = encode_image(generated)
     return response

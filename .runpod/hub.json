@@ -1,18 +1,14 @@
 {
-  "title": "Qwen Image Edit 2511 + NSFW LoRA",
-  "description": "Mixed-precision NF4 Qwen-Image-Edit-2511 with explicitly activated ScottzillaSystems LoRA; raw or target-only output.",
+  "title": "Qwen Image Edit Rapid AIO v23 NVFP4 GGUF",
+  "description": "One-image Qwen Rapid AIO v23 edit worker using ComfyUI-GGUF and Blackwell CUDA 13.2.",
   "type": "serverless",
   "category": "image",
   "config": {
     "runsOn": "GPU",
     "containerDiskInGb": 40,
     "gpuCount": 1,
-    "gpuIds": "ADA_24,AMPERE_24,ADA_80_PRO,AMPERE_80",
+    "gpuIds": "ADA_32_PRO,BLACKWELL_96",
     "allowedCudaVersions": [
-      "12.8",
-      "12.9",
-      "13.0",
-      "13.1",
       "13.2",
       "13.3"
     ],
@@ -23,16 +19,6 @@
           "name": "Hugging Face access token",
           "type": "string",
           "description": "Optional. Helps avoid anonymous Hugging Face rate limits.",
-          "advanced": true
-        }
-      },
-      {
-        "key": "QWEN_LORA_REPO",
-        "input": {
-          "name": "Qwen image-edit LoRA repository",
-          "type": "string",
-          "description": "Hugging Face LoRA to apply to Qwen-Image-Edit-2511.",
-          "default": "ScottzillaSystems/qwen-image-edit-plus-nsfw-lora",
           "advanced": true
         }
       },

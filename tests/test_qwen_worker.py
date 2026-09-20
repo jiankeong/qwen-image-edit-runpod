@@ -1,12 +1,9 @@
 import base64
 import io
 import os
-import errno
-import tempfile
-import sys
 import unittest
+from unittest.mock import Mock, patch
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import numpy as np
 from PIL import Image
@@ -14,187 +11,76 @@ from PIL import Image
 import handler
 
 
-class QwenWorkerTests(unittest.TestCase):
-    def test_auto_offload_selects_model_on_small_gpu(self):
-        pipe = SimpleNamespace(
-            enable_sequential_cpu_offload=unittest.mock.Mock(),
-            enable_model_cpu_offload=unittest.mock.Mock(),
-        )
-        self.assertEqual(handler.configure_offload(pipe, 23.5), 'model')
-        pipe.enable_model_cpu_offload.assert_called_once_with()
-        pipe.enable_sequential_cpu_offload.assert_not_called()
+def encoded_image(color=(10, 20, 30)):
+    image = Image.new('RGB', (16, 16), color)
+    stream = io.BytesIO()
+    image.save(stream, format='PNG')
+    return base64.b64encode(stream.getvalue()).decode()
 
-    def test_sequential_offload_remains_explicit_option(self):
-        pipe = SimpleNamespace(
-            enable_sequential_cpu_offload=unittest.mock.Mock(),
-            enable_model_cpu_offload=unittest.mock.Mock(),
-        )
-        self.assertEqual(handler.configure_offload(pipe, 23.5, 'sequential'), 'sequential')
-        pipe.enable_sequential_cpu_offload.assert_called_once_with()
 
-    def test_offload_selects_model_for_large_gpu(self):
-        pipe = SimpleNamespace(
-            enable_sequential_cpu_offload=unittest.mock.Mock(),
-            enable_model_cpu_offload=unittest.mock.Mock(),
-        )
-        self.assertEqual(handler.configure_offload(pipe, 79.0), 'model')
-        pipe.enable_model_cpu_offload.assert_called_once_with()
+class WorkerTests(unittest.TestCase):
+    def test_workflow_uses_exact_gguf_components(self):
+        graph = handler.build_workflow('source.png', 'red jacket', ' ', 4, 1.0, 1.0, 7)
+        self.assertEqual(graph['2']['class_type'], 'CLIPLoaderGGUF')
+        self.assertEqual(graph['2']['inputs']['clip_name'], 'text_encoder-NVFP4.gguf')
+        self.assertEqual(graph['4']['class_type'], 'UnetLoaderGGUF')
+        self.assertEqual(graph['4']['inputs']['unet_name'], 'qwen-v23-diffusion-NVFP4.gguf')
+        self.assertEqual(graph['3']['inputs']['vae_name'], 'vae.safetensors')
+        self.assertEqual(graph['5']['class_type'], 'TextEncodeQwenImageEditPlus')
+        self.assertEqual(graph['1']['inputs']['image'], 'source.png')
+        self.assertEqual(graph['8']['inputs']['steps'], 4)
+        self.assertEqual(graph['8']['inputs']['cfg'], 1.0)
+        self.assertEqual(graph['8']['inputs']['denoise'], 1.0)
+        self.assertEqual(graph['8']['inputs']['seed'], 7)
 
-    def test_target_inference(self):
-        self.assertEqual(handler.choose_target('把衣服换成蓝色'), 'clothes')
-        self.assertEqual(handler.choose_target('换成海边风景'), 'background')
-        with self.assertRaisesRegex(ValueError, 'ambiguous'):
-            handler.choose_target('make it beautiful')
+    def test_defaults_and_single_image(self):
+        pipe = Mock(return_value=SimpleNamespace(images=[Image.new('RGB', (16, 16), (200, 100, 50))]))
+        with patch.object(handler, 'get_pipeline', return_value=pipe):
+            answer = handler.handler({'input': {'image': encoded_image(), 'prompt': 'red jacket'}})
+        self.assertEqual(answer['model'], handler.BASE_REPO)
+        self.assertEqual(answer['output_mode'], 'raw')
+        self.assertEqual(pipe.call_args.kwargs['num_inference_steps'], 4)
+        self.assertEqual(pipe.call_args.kwargs['guidance_scale'], 1.0)
+        self.assertEqual(pipe.call_args.kwargs['strength'], 1.0)
+        self.assertEqual(pipe.call_args.kwargs['seed'], 0)
+        self.assertEqual(pipe.call_args.kwargs['negative_prompt'], ' ')
 
-    def test_masks_and_exact_composite(self):
-        labels = np.zeros((16, 16), dtype=np.int64)
-        labels[:8, :] = 4
-        clothes = handler.make_mask(labels, 'clothes')
-        background = handler.make_mask(labels, 'background')
-        self.assertTrue(np.all(clothes[:8]))
-        self.assertTrue(np.all(background[8:]))
-        original = Image.new('RGB', (16, 16), (10, 20, 30))
-        generated = Image.new('RGB', (16, 16), (200, 100, 50))
-        result = handler.composite_exact(original, generated, clothes)
-        self.assertEqual(result.getpixel((0, 0)), (200, 100, 50))
-        self.assertEqual(result.getpixel((0, 15)), (10, 20, 30))
+    def test_custom_parameters(self):
+        pipe = Mock(return_value=SimpleNamespace(images=[Image.new('RGB', (16, 16))]))
+        with patch.object(handler, 'get_pipeline', return_value=pipe):
+            handler.handler({'input': {'image': encoded_image(), 'prompt': 'edit', 'steps': 8,
+                                      'true_cfg_scale': 2.5, 'strength': 0.5, 'seed': 42}})
+        self.assertEqual(pipe.call_args.kwargs['guidance_scale'], 2.5)
+        self.assertEqual(pipe.call_args.kwargs['seed'], 42)
 
-    def test_one_image_handler(self):
-        image = Image.new('RGB', (16, 16), (10, 20, 30))
-        buffer = io.BytesIO()
-        image.save(buffer, format='PNG')
-        labels = np.zeros((16, 16), dtype=np.int64)
-        labels[:8] = 4
-        fake_pipeline = lambda **kwargs: SimpleNamespace(images=[Image.new('RGB', (16, 16), (200, 100, 50))])
-        with patch.object(handler, 'parser_labels', return_value=labels), patch.object(handler, 'get_pipeline', return_value=fake_pipeline):
-            response = handler.handler({'input': {
-                'image': base64.b64encode(buffer.getvalue()).decode(),
-                'prompt': 'Change the shirt to red', 'edit_target': 'clothes', 'output_mode': 'masked'
-            }})
-        result = Image.open(io.BytesIO(base64.b64decode(response['image'])))
-        self.assertEqual(result.getpixel((0, 0)), (200, 100, 50))
-        self.assertEqual(result.getpixel((0, 15)), (10, 20, 30))
-        self.assertEqual(response['edit_target'], 'clothes')
-        self.assertNotIn('raw_image', response)
+    def test_invalid_parameters(self):
+        for payload, message in [({'steps': 0}, 'steps'), ({'true_cfg_scale': 0}, 'guidance'),
+                                 ({'strength': 0}, 'strength'), ({'seed': -1}, 'seed'),
+                                 ({'output_mode': 'other'}, 'output_mode')]:
+            with self.subTest(payload=payload), self.assertRaisesRegex(ValueError, message):
+                handler.handler({'input': {'prompt': 'edit', **payload}})
 
-    def test_raw_output_exposes_unmasked_lora_result(self):
-        image = Image.new('RGB', (16, 16), (10, 20, 30))
-        buffer = io.BytesIO()
-        image.save(buffer, format='PNG')
+    def test_mask_composite_preserves_other_pixels(self):
         labels = np.zeros((16, 16), dtype=np.int64)
         labels[:8] = 4
-        generated = Image.new('RGB', (16, 16), (200, 100, 50))
-        fake_pipeline = unittest.mock.Mock(return_value=SimpleNamespace(images=[generated]))
-        with patch.object(handler, 'parser_labels', return_value=labels), \
-             patch.object(handler, 'get_pipeline', return_value=fake_pipeline):
-            response = handler.handler({'input': {
-                'image': base64.b64encode(buffer.getvalue()).decode(),
-                'prompt': 'Change the shirt', 'edit_target': 'clothes', 'output_mode': 'masked', 'return_raw': True,
-            }})
-        final = Image.open(io.BytesIO(base64.b64decode(response['image'])))
-        raw = Image.open(io.BytesIO(base64.b64decode(response['raw_image'])))
-        self.assertEqual(final.getpixel((0, 15)), (10, 20, 30))
-        self.assertEqual(raw.getpixel((0, 15)), (200, 100, 50))
-
-    def test_raw_mode_returns_full_lora_output_without_parser(self):
-        image = Image.new('RGB', (16, 16), (10, 20, 30))
-        buffer = io.BytesIO()
-        image.save(buffer, format='PNG')
-        generated = Image.new('RGB', (16, 16), (200, 100, 50))
-        fake_pipeline = unittest.mock.Mock(return_value=SimpleNamespace(images=[generated]))
-        with patch.object(handler, 'parser_labels') as parser, \
-             patch.object(handler, 'get_pipeline', return_value=fake_pipeline):
-            response = handler.handler({'input': {
-                'image': base64.b64encode(buffer.getvalue()).decode(),
-                'prompt': 'Transform the image',
-            }})
-        parser.assert_not_called()
+        pipe = Mock(return_value=SimpleNamespace(images=[Image.new('RGB', (16, 16), (200, 100, 50))]))
+        with patch.object(handler, 'get_pipeline', return_value=pipe), patch.object(handler, 'parser_labels', return_value=labels):
+            response = handler.handler({'input': {'image': encoded_image(), 'prompt': 'red shirt',
+                                                  'output_mode': 'masked', 'edit_target': 'clothes'}})
         output = Image.open(io.BytesIO(base64.b64decode(response['image'])))
-        self.assertEqual(output.getpixel((0, 15)), (200, 100, 50))
-        self.assertEqual(response['output_mode'], 'raw')
-        self.assertEqual(response['edit_target'], 'full')
-        self.assertIsInstance(fake_pipeline.call_args.kwargs['image'], Image.Image)
-        self.assertEqual(fake_pipeline.call_args.kwargs['num_inference_steps'], 40)
-        self.assertEqual(fake_pipeline.call_args.kwargs['true_cfg_scale'], 4.0)
-        self.assertEqual(fake_pipeline.call_args.kwargs['negative_prompt'], ' ')
-        self.assertNotIn('guidance_scale', fake_pipeline.call_args.kwargs)
+        self.assertEqual(output.getpixel((0, 0)), (200, 100, 50))
+        self.assertEqual(output.getpixel((0, 15)), (10, 20, 30))
 
-    def test_invalid_output_mode_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, 'output_mode'):
-            handler.handler({'input': {'prompt': 'edit', 'output_mode': 'invalid'}})
-
-    def test_input_true_cfg_scale_overrides_default(self):
-        image = Image.new('RGB', (16, 16), (10, 20, 30))
-        buffer = io.BytesIO()
-        image.save(buffer, format='PNG')
-        encoded = base64.b64encode(buffer.getvalue()).decode()
-        fake_pipeline = unittest.mock.Mock(return_value=SimpleNamespace(images=[image]))
-        with patch.object(handler, 'get_pipeline', return_value=fake_pipeline):
-            handler.handler({'input': {'image': encoded, 'prompt': 'edit', 'true_cfg_scale': 2.5}})
-            self.assertEqual(fake_pipeline.call_args.kwargs['true_cfg_scale'], 2.5)
-            self.assertEqual(fake_pipeline.call_args.kwargs['negative_prompt'], ' ')
-            handler.handler({'input': {'image': encoded, 'prompt': 'edit', 'true_cfg_scale': 1.0}})
-            self.assertEqual(fake_pipeline.call_args.kwargs['true_cfg_scale'], 1.0)
-            self.assertIsNone(fake_pipeline.call_args.kwargs['negative_prompt'])
-
-    def test_invalid_true_cfg_scale_is_rejected(self):
-        for value in (0, -1, True, '4', float('nan'), float('inf')):
-            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'true_cfg_scale'):
-                handler.handler({'input': {'prompt': 'edit', 'true_cfg_scale': value}})
-
-    def test_mock_pipeline_skips_download(self):
+    def test_mock_mode(self):
         with patch.dict(os.environ, {'USE_MOCK_PIPELINE': '1'}):
             result = handler.handler({'input': {'image': 'mock'}})
+        self.assertEqual(result['model'], handler.BASE_REPO)
         self.assertEqual(result['mode'], 'mock')
 
-    def test_quota_error_reports_volume_capacity(self):
-        with tempfile.TemporaryDirectory() as volume:
-            with patch.dict(os.environ, {'RUNPOD_VOLUME_PATH': volume}):
-                message = handler.storage_quota_message(os.path.join(volume, 'hf-cache'))
-        self.assertIn('GiB free', message)
-        self.assertIn('60 GB free', message)
-        self.assertIn('df -h', message)
-
-    def test_pipeline_download_quota_has_actionable_error(self):
-        def fail_download(*args, **kwargs):
-            raise OSError(errno.EDQUOT, 'Disk quota exceeded')
-
-        fake_diffusers = SimpleNamespace(QwenImageEditPlusPipeline=SimpleNamespace(from_pretrained=fail_download))
-        fake_torch = SimpleNamespace(bfloat16='bf16')
-        with tempfile.TemporaryDirectory() as volume:
-            with patch.dict(os.environ, {'RUNPOD_VOLUME_PATH': volume}), \
-                 patch.dict(sys.modules, {'torch': fake_torch, 'diffusers': fake_diffusers}), \
-                 patch.object(handler, 'CACHE_DIR', __import__('pathlib').Path(volume) / 'hf-cache'), \
-                 patch.object(handler, '_PIPELINE', None):
-                with self.assertRaisesRegex(RuntimeError, 'Expand the Network Volume'):
-                    handler.get_pipeline()
-
-    def test_pipeline_loads_full_base_and_activates_named_lora(self):
-        pipe = SimpleNamespace(
-            load_lora_weights=unittest.mock.Mock(),
-            set_adapters=unittest.mock.Mock(),
-            enable_model_cpu_offload=unittest.mock.Mock(),
-            enable_sequential_cpu_offload=unittest.mock.Mock(),
-        )
-        load_base = unittest.mock.Mock(return_value=pipe)
-        fake_diffusers = SimpleNamespace(QwenImageEditPlusPipeline=SimpleNamespace(from_pretrained=load_base))
-        fake_torch = SimpleNamespace(
-            bfloat16='bf16',
-            cuda=SimpleNamespace(is_available=lambda: True, mem_get_info=lambda: (23 * 1024 ** 3, 24 * 1024 ** 3)),
-        )
-        with tempfile.TemporaryDirectory() as volume:
-            with patch.dict(sys.modules, {'torch': fake_torch, 'diffusers': fake_diffusers}), \
-                 patch.object(handler, 'CACHE_DIR', __import__('pathlib').Path(volume) / 'hf-cache'), \
-                 patch.object(handler, '_PIPELINE', None), \
-                 patch.dict(os.environ, {'QWEN_OFFLOAD_MODE': 'auto'}):
-                self.assertIs(handler.get_pipeline(), pipe)
-        self.assertEqual(load_base.call_args.args[0], 'toandev/Qwen-Image-Edit-2511-4bit')
-        self.assertEqual(pipe.load_lora_weights.call_args.args[0], handler.LORA_REPO)
-        self.assertEqual(pipe.load_lora_weights.call_args.kwargs['weight_name'], 'qwen-image-edit-plus-nsfw-lora.safetensors')
-        self.assertEqual(pipe.load_lora_weights.call_args.kwargs['adapter_name'], 'mcnl-nsfw-v1')
-        pipe.set_adapters.assert_called_once_with(['mcnl-nsfw-v1'])
-        pipe.enable_model_cpu_offload.assert_called_once_with()
-
-
-if __name__ == '__main__':
-    unittest.main()
+    def test_comfy_client_errors_and_cleanup(self):
+        with __import__('tempfile').TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {'COMFY_INPUT_DIR': directory}), patch.object(handler, 'comfy_json', return_value={'error': 'bad node'}):
+                with self.assertRaisesRegex(RuntimeError, 'workflow validation'):
+                    handler.run_comfy_edit(image=Image.new('RGB', (16, 16)), prompt='edit', negative_prompt=' ',
+                                           num_inference_steps=4, guidance_scale=1.0, strength=1.0, seed=0)
+            self.assertEqual(os.listdir(directory), [])
