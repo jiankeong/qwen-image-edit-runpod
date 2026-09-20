@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image, ImageOps
 
 BASE_REPO = "Qwen/Qwen-Image-Edit-2511"
-LORA_REPO = os.getenv("QWEN_LORA_REPO", "ScottzillaSystems/qwen-image-edit-plus-nsfw-lora")
+LORA_REPO = os.getenv("QWEN_LORA_REPO", "Plana-Chan/qwen-image-edit-plus-nsfw-lora")
 PARSER_REPO = "mattmdjaga/segformer_b2_clothes"
 CACHE_DIR = Path(os.getenv("RUNPOD_VOLUME_PATH", "/runpod-volume")) / "hf-cache"
 CLOTHES_LABELS = (4, 5, 6, 7, 8, 17)
@@ -137,6 +137,7 @@ def get_pipeline():
         token = os.getenv("HF_TOKEN") or None
         try:
             pipe = QwenImageEditPlusPipeline.from_pretrained(BASE_REPO, torch_dtype=torch.bfloat16, cache_dir=str(CACHE_DIR), token=token)
+            print(f"[qwen-worker] loading LoRA={LORA_REPO}", flush=True)
             pipe.load_lora_weights(LORA_REPO, cache_dir=str(CACHE_DIR), token=token)
         except OSError as exc:
             if exc.errno not in (errno.ENOSPC, errno.EDQUOT, 122):

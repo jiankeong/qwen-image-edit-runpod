@@ -1,4 +1,5 @@
 import unittest
+import json
 from pathlib import Path
 
 from packaging.requirements import Requirement
@@ -7,6 +8,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DependencyContractTests(unittest.TestCase):
+    def test_default_lora_matches_runpod_manifest(self):
+        manifest = json.loads((ROOT / '.runpod/hub.json').read_text())
+        env = {item['key']: item['input'] for item in manifest['config']['env']}
+        self.assertEqual(env['QWEN_LORA_REPO']['default'], 'Plana-Chan/qwen-image-edit-plus-nsfw-lora')
+        self.assertIn('Plana-Chan/qwen-image-edit-plus-nsfw-lora', (ROOT / 'handler.py').read_text())
+        self.assertNotIn('ScottzillaSystems', (ROOT / 'README.md').read_text())
+
     def test_single_compatible_hf_install(self):
         dockerfile = (ROOT / 'Dockerfile').read_text()
         self.assertEqual(dockerfile.count('pip install'), 1)

@@ -1,6 +1,6 @@
-# Qwen-Image-Edit-2511 + ScottzillaSystems NSFW LoRA — RunPod
+# Qwen-Image-Edit-2511 + Plana-Chan NSFW LoRA — RunPod
 
-This worker uses the full [Qwen/Qwen-Image-Edit-2511](https://huggingface.co/Qwen/Qwen-Image-Edit-2511) editing pipeline and loads [ScottzillaSystems/qwen-image-edit-plus-nsfw-lora](https://huggingface.co/ScottzillaSystems/qwen-image-edit-plus-nsfw-lora). It no longer uses the Qwen Turbo GGUF or FLUX checkpoint.
+This worker uses the full [Qwen/Qwen-Image-Edit-2511](https://huggingface.co/Qwen/Qwen-Image-Edit-2511) editing pipeline and loads [Plana-Chan/qwen-image-edit-plus-nsfw-lora](https://huggingface.co/Plana-Chan/qwen-image-edit-plus-nsfw-lora). It no longer uses the Qwen Turbo GGUF or FLUX checkpoint. The linked repository is a LoRA adapter, not a replacement for the large Qwen base model; changing the adapter does not remove the base model's VRAM or disk requirements. If `QWEN_LORA_REPO` is already set in the RunPod endpoint, update it to this repository or remove the override before redeploying.
 
 ## One uploaded image, targeted output
 
