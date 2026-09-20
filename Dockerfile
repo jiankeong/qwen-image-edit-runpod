@@ -1,4 +1,4 @@
-FROM nvidia/cuda:13.2.0-cudnn-runtime-ubuntu24.04
+FROM nvidia/cuda:13.0.0-cudnn-runtime-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -15,9 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && python3 -m venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
 
-# CUDA 13.2 wheels are needed for the NVFP4 Blackwell checkpoint.
+# CUDA 13.0 supports Blackwell and allows a wider RunPod host-driver pool.
 RUN pip install --no-cache-dir torch==2.13.0 torchvision==0.28.0 \
-      --index-url https://download.pytorch.org/whl/cu132 \
+      --index-url https://download.pytorch.org/whl/cu130 \
     && git clone --depth 1 https://github.com/Comfy-Org/ComfyUI.git /opt/ComfyUI \
     && git clone --depth 1 https://github.com/city96/ComfyUI-GGUF.git /opt/ComfyUI/custom_nodes/ComfyUI-GGUF \
     && pip install --no-cache-dir -r /opt/ComfyUI/requirements.txt \

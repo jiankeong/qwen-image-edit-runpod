@@ -13,10 +13,12 @@
   "config": {
     "gpuCount": 1,
     "allowedCudaVersions": [
+      "13.0",
+      "13.1",
       "13.2",
       "13.3"
     ],
-    "gpuTypeId": "NVIDIA GeForce RTX 5090",
+    "gpuTypeId": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
     "env": [
       {
         "key": "USE_MOCK_PIPELINE",
