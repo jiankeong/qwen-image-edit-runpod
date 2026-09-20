@@ -1,5 +1,133 @@
-# RunPod Hub repository validation stub.
-# Production serving is inherited from runpod/worker-comfyui.
+"""RunPod worker: Qwen-Image-Edit-2511 + NSFW LoRA, with target-only pixels."""
+
+import base64
+import io
+import os
+import re
+from pathlib import Path
+
+import numpy as np
+from PIL import Image, ImageOps
+
+BASE_REPO = "Qwen/Qwen-Image-Edit-2511"
+LORA_REPO = os.getenv("QWEN_LORA_REPO", "ScottzillaSystems/qwen-image-edit-plus-nsfw-lora")
+PARSER_REPO = "mattmdjaga/segformer_b2_clothes"
+CACHE_DIR = Path(os.getenv("RUNPOD_VOLUME_PATH", "/runpod-volume")) / "hf-cache"
+CLOTHES_LABELS = (4, 5, 6, 7, 8, 17)
+_PIPELINE = None
+_PARSER = None
+_PROCESSOR = None
+
+
+def choose_target(prompt, target="auto"):
+    if target in ("clothes", "background"):
+        return target
+    if target != "auto":
+        raise ValueError("edit_target must be auto, clothes, or background")
+    lower = prompt.lower()
+    clothes = bool(re.search(r"衣|服装|裙|裤|外套|衬衫|上衣|dress|shirt|jacket|coat|pants|skirt|clothes|outfit|garment", lower))
+    background = bool(re.search(r"背景|风景|场景|天空|海边|森林|background|scenery|landscape|beach|forest|sky", lower))
+    if clothes == background:
+        raise ValueError("Prompt target is ambiguous; set edit_target to clothes or background")
+    return "clothes" if clothes else "background"
+
+
+def decode_image(value):
+    if not isinstance(value, str) or not value:
+        raise ValueError("input.image must contain one base64 image")
+    if value.startswith("data:"):
+        value = value.partition(",")[2]
+    raw = base64.b64decode(value, validate=True)
+    with Image.open(io.BytesIO(raw)) as image:
+        image = ImageOps.exif_transpose(image)
+        if image.width * image.height > 20_000_000:
+            raise ValueError("Input image exceeds 20 megapixels")
+        return image.convert("RGB")
+
+
+def encode_image(image):
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def parser_labels(image):
+    global _PARSER, _PROCESSOR
+    import torch
+    from transformers import AutoImageProcessor, SegformerForSemanticSegmentation
+
+    if _PARSER is None:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        token = os.getenv("HF_TOKEN") or None
+        _PROCESSOR = AutoImageProcessor.from_pretrained(PARSER_REPO, cache_dir=str(CACHE_DIR), token=token)
+        _PARSER = SegformerForSemanticSegmentation.from_pretrained(PARSER_REPO, cache_dir=str(CACHE_DIR), token=token).eval().to("cpu")
+    inputs = _PROCESSOR(images=image, return_tensors="pt")
+    with torch.inference_mode():
+        logits = _PARSER(**inputs).logits
+        logits = torch.nn.functional.interpolate(logits, size=(image.height, image.width), mode="bilinear", align_corners=False)
+    return logits.argmax(dim=1)[0].cpu().numpy()
+
+
+def make_mask(labels, target):
+    if target == "clothes":
+        selected = np.isin(labels, CLOTHES_LABELS)
+    elif target == "background":
+        selected = labels == 0
+    else:
+        raise ValueError("Unsupported edit target")
+    if selected.sum() < 64:
+        raise ValueError(f"No usable {target} region found in input image")
+    return selected
+
+
+def composite_exact(original, edited, mask):
+    if edited.size != original.size:
+        edited = edited.resize(original.size, Image.Resampling.LANCZOS)
+    if mask.shape != (original.height, original.width):
+        raise ValueError("Mask dimensions do not match source image")
+    source_pixels = np.asarray(original.convert("RGB"))
+    edited_pixels = np.asarray(edited.convert("RGB"))
+    output_pixels = np.where(mask[..., None], edited_pixels, source_pixels).astype(np.uint8)
+    if not np.array_equal(output_pixels[~mask], source_pixels[~mask]):
+        raise RuntimeError("Unselected source pixels changed")
+    return Image.fromarray(output_pixels, mode="RGB")
+
+
+def get_pipeline():
+    global _PIPELINE
+    if _PIPELINE is None:
+        import torch
+        from diffusers import QwenImageEditPlusPipeline
+
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        token = os.getenv("HF_TOKEN") or None
+        pipe = QwenImageEditPlusPipeline.from_pretrained(BASE_REPO, torch_dtype=torch.bfloat16, cache_dir=str(CACHE_DIR), token=token)
+        pipe.load_lora_weights(LORA_REPO, cache_dir=str(CACHE_DIR), token=token)
+        pipe.enable_model_cpu_offload()
+        _PIPELINE = pipe
+    return _PIPELINE
+
 
 def handler(event):
-    return {"ok": True, "message": "qwen-image-edit-runpod repository is valid"}
+    payload = event.get("input", event)
+    if os.getenv("USE_MOCK_PIPELINE") == "1":
+        return {"ok": True, "mode": "mock", "model": BASE_REPO, "lora": LORA_REPO}
+    prompt = payload.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("input.prompt must be a nonempty string")
+    target = choose_target(prompt, payload.get("edit_target", "auto"))
+    original = decode_image(payload.get("image"))
+    labels = parser_labels(original)
+    mask = make_mask(labels, target)
+    generated = get_pipeline()(
+        image=[original], prompt=prompt, negative_prompt=" ",
+        num_inference_steps=int(payload.get("steps", 40)),
+        true_cfg_scale=4.0, guidance_scale=1.0, num_images_per_prompt=1,
+    ).images[0]
+    result = composite_exact(original, generated, mask)
+    return {"image": encode_image(result), "format": "png", "edit_target": target, "model": BASE_REPO, "lora": LORA_REPO}
+
+
+if __name__ == "__main__":
+    import runpod
+    runpod.serverless.start({"handler": handler})

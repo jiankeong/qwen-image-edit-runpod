@@ -1,0 +1,58 @@
+import base64
+import io
+import os
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import numpy as np
+from PIL import Image
+
+import handler
+
+
+class QwenWorkerTests(unittest.TestCase):
+    def test_target_inference(self):
+        self.assertEqual(handler.choose_target('把衣服换成蓝色'), 'clothes')
+        self.assertEqual(handler.choose_target('换成海边风景'), 'background')
+        with self.assertRaisesRegex(ValueError, 'ambiguous'):
+            handler.choose_target('make it beautiful')
+
+    def test_masks_and_exact_composite(self):
+        labels = np.zeros((16, 16), dtype=np.int64)
+        labels[:8, :] = 4
+        clothes = handler.make_mask(labels, 'clothes')
+        background = handler.make_mask(labels, 'background')
+        self.assertTrue(np.all(clothes[:8]))
+        self.assertTrue(np.all(background[8:]))
+        original = Image.new('RGB', (16, 16), (10, 20, 30))
+        generated = Image.new('RGB', (16, 16), (200, 100, 50))
+        result = handler.composite_exact(original, generated, clothes)
+        self.assertEqual(result.getpixel((0, 0)), (200, 100, 50))
+        self.assertEqual(result.getpixel((0, 15)), (10, 20, 30))
+
+    def test_one_image_handler(self):
+        image = Image.new('RGB', (16, 16), (10, 20, 30))
+        buffer = io.BytesIO()
+        image.save(buffer, format='PNG')
+        labels = np.zeros((16, 16), dtype=np.int64)
+        labels[:8] = 4
+        fake_pipeline = lambda **kwargs: SimpleNamespace(images=[Image.new('RGB', (16, 16), (200, 100, 50))])
+        with patch.object(handler, 'parser_labels', return_value=labels), patch.object(handler, 'get_pipeline', return_value=fake_pipeline):
+            response = handler.handler({'input': {
+                'image': base64.b64encode(buffer.getvalue()).decode(),
+                'prompt': 'Change the shirt to red', 'edit_target': 'clothes'
+            }})
+        result = Image.open(io.BytesIO(base64.b64decode(response['image'])))
+        self.assertEqual(result.getpixel((0, 0)), (200, 100, 50))
+        self.assertEqual(result.getpixel((0, 15)), (10, 20, 30))
+        self.assertEqual(response['edit_target'], 'clothes')
+
+    def test_mock_pipeline_skips_download(self):
+        with patch.dict(os.environ, {'USE_MOCK_PIPELINE': '1'}):
+            result = handler.handler({'input': {'image': 'mock'}})
+        self.assertEqual(result['mode'], 'mock')
+
+
+if __name__ == '__main__':
+    unittest.main()

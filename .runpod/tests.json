@@ -1,29 +1,11 @@
 {
   "tests": [
     {
-      "name": "smoke_flux_image_edit",
+      "name": "smoke_qwen_2511_edit",
       "input": {
-        "workflow": {
-          "1": {
-            "class_type": "EmptyImage",
-            "inputs": {
-              "width": 64,
-              "height": 64,
-              "batch_size": 1,
-              "color": 0
-            }
-          },
-          "2": {
-            "class_type": "SaveImage",
-            "inputs": {
-              "filename_prefix": "hub_smoke",
-              "images": [
-                "1",
-                0
-              ]
-            }
-          }
-        }
+        "image": "mock",
+        "prompt": "Change the shirt to red",
+        "edit_target": "clothes"
       },
       "timeout": 300000
     }

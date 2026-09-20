@@ -2,15 +2,9 @@ FROM runpod/worker-comfyui:5.8.6-base-cuda12.8.1
 
 USER root
 
-# The bundled Haar cascade detects face regions; NumPy and Torch come from the base image.
-RUN pip install --no-cache-dir --no-deps opencv-python-headless==4.10.0.84
-COPY custom_nodes/face_lock /comfyui/custom_nodes/face_lock
-COPY scripts/bootstrap_flux.py /opt/flux/bootstrap_flux.py
-COPY scripts/start_flux.sh /opt/flux/start_flux.sh
-COPY config/extra_model_paths.yaml /comfyui/extra_model_paths.yaml
-COPY handler.py /workspace/handler.py
+# Keep the tested CUDA/PyTorch base and use the official Qwen 2511 Diffusers pipeline.
+RUN pip install --no-cache-dir 'runpod>=1.7' 'transformers>=4.51' 'accelerate>=1.5' 'peft>=0.15' \
+    && pip install --no-cache-dir git+https://github.com/huggingface/diffusers.git
 
-# Prepare Network Volume models before starting the inherited ComfyUI worker.
-# The Hub smoke test skips the downloads.
-RUN chmod +x /opt/flux/start_flux.sh
-CMD ["/opt/flux/start_flux.sh"]
+COPY handler.py /workspace/handler.py
+CMD ["python", "/workspace/handler.py"]
