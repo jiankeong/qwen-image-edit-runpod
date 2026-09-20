@@ -2,6 +2,14 @@ FROM runpod/worker-comfyui:5.8.6-base-cuda12.8.1
 
 USER root
 
+# Hub and hf-xet read these at import time. Keep every download/cache on the
+# mounted Network Volume instead of the small writable container layer.
+ENV HF_HOME=/runpod-volume/hf-home \
+    HF_HUB_CACHE=/runpod-volume/hf-cache \
+    HF_XET_CACHE=/runpod-volume/hf-home/xet \
+    HF_XET_CHUNK_CACHE_SIZE_BYTES=0 \
+    TMPDIR=/runpod-volume/tmp
+
 # Resolve the full HF stack together. Transformers 4.x requires hub<1.0;
 # installing Diffusers main separately previously upgraded hub to 1.x.
 RUN pip install --no-cache-dir \
@@ -15,4 +23,5 @@ RUN pip install --no-cache-dir \
     && pip check
 
 COPY handler.py /workspace/handler.py
-CMD ["python", "/workspace/handler.py"]
+COPY startup.sh /workspace/startup.sh
+CMD ["sh", "/workspace/startup.sh"]

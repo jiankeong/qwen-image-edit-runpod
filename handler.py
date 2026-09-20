@@ -1,9 +1,11 @@
 """RunPod worker: Qwen-Image-Edit-2511 + NSFW LoRA, with target-only pixels."""
 
 import base64
+import errno
 import io
 import os
 import re
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +19,23 @@ CLOTHES_LABELS = (4, 5, 6, 7, 8, 17)
 _PIPELINE = None
 _PARSER = None
 _PROCESSOR = None
+
+
+def storage_quota_message(path):
+    """Report the actual filesystem capacity rather than hiding errno 122."""
+    volume = Path(os.getenv("RUNPOD_VOLUME_PATH", "/runpod-volume"))
+    usage = shutil.disk_usage(volume)
+    gib = 1024 ** 3
+    return (
+        f"Model download exhausted storage at {path}; Network Volume "
+        f"{volume}: {usage.free / gib:.1f} GiB free / "
+        f"{usage.total / gib:.1f} GiB total. "
+        "Qwen-Image-Edit-2511 needs about 60 GB for its base weights alone. "
+        "Expand the Network Volume to at least 100 GB free, or remove old "
+        "model/cache files after checking what they contain. "
+        f"Inspect with: df -h {volume}; du -sh {volume}/hf-cache "
+        f"{volume}/hf-home {volume}/models 2>/dev/null"
+    )
 
 
 def choose_target(prompt, target="auto"):
@@ -101,8 +120,13 @@ def get_pipeline():
 
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         token = os.getenv("HF_TOKEN") or None
-        pipe = QwenImageEditPlusPipeline.from_pretrained(BASE_REPO, torch_dtype=torch.bfloat16, cache_dir=str(CACHE_DIR), token=token)
-        pipe.load_lora_weights(LORA_REPO, cache_dir=str(CACHE_DIR), token=token)
+        try:
+            pipe = QwenImageEditPlusPipeline.from_pretrained(BASE_REPO, torch_dtype=torch.bfloat16, cache_dir=str(CACHE_DIR), token=token)
+            pipe.load_lora_weights(LORA_REPO, cache_dir=str(CACHE_DIR), token=token)
+        except OSError as exc:
+            if exc.errno not in (errno.ENOSPC, errno.EDQUOT, 122):
+                raise
+            raise RuntimeError(storage_quota_message(CACHE_DIR)) from exc
         pipe.enable_model_cpu_offload()
         _PIPELINE = pipe
     return _PIPELINE

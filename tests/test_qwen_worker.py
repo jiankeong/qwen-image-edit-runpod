@@ -1,6 +1,9 @@
 import base64
 import io
 import os
+import errno
+import tempfile
+import sys
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -52,6 +55,28 @@ class QwenWorkerTests(unittest.TestCase):
         with patch.dict(os.environ, {'USE_MOCK_PIPELINE': '1'}):
             result = handler.handler({'input': {'image': 'mock'}})
         self.assertEqual(result['mode'], 'mock')
+
+    def test_quota_error_reports_volume_capacity(self):
+        with tempfile.TemporaryDirectory() as volume:
+            with patch.dict(os.environ, {'RUNPOD_VOLUME_PATH': volume}):
+                message = handler.storage_quota_message(os.path.join(volume, 'hf-cache'))
+        self.assertIn('GiB free', message)
+        self.assertIn('100 GB free', message)
+        self.assertIn('df -h', message)
+
+    def test_pipeline_download_quota_has_actionable_error(self):
+        def fail_download(*args, **kwargs):
+            raise OSError(errno.EDQUOT, 'Disk quota exceeded')
+
+        fake_diffusers = SimpleNamespace(QwenImageEditPlusPipeline=SimpleNamespace(from_pretrained=fail_download))
+        fake_torch = SimpleNamespace(bfloat16='bf16')
+        with tempfile.TemporaryDirectory() as volume:
+            with patch.dict(os.environ, {'RUNPOD_VOLUME_PATH': volume}), \
+                 patch.dict(sys.modules, {'torch': fake_torch, 'diffusers': fake_diffusers}), \
+                 patch.object(handler, 'CACHE_DIR', __import__('pathlib').Path(volume) / 'hf-cache'), \
+                 patch.object(handler, '_PIPELINE', None):
+                with self.assertRaisesRegex(RuntimeError, 'Expand the Network Volume'):
+                    handler.get_pipeline()
 
 
 if __name__ == '__main__':

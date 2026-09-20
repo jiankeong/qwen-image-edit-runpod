@@ -10,7 +10,16 @@ The worker runs Qwen image editing on the source image, segments the source with
 
 ## Deployment
 
-Attach a Network Volume at `/runpod-volume`; the model cache is `/runpod-volume/hf-cache`. Allocate at least **100 GB free** for the BF16 base, LoRA, parser and download cache; previous model files are not removed automatically. Start testing on an **80 GB GPU**. The full Qwen-Image-Edit-2511 is a 20B BF16 model and cold starts may be long. `USE_MOCK_PIPELINE=1` skips model loading in Hub smoke tests. `HF_TOKEN` can help with download rate limits.
+Attach a Network Volume at `/runpod-volume`; the Hub model cache, Xet cache and temporary downloads are all directed there. Allocate at least **100 GB free** for the BF16 base, LoRA, parser and downloads; previous model files are not removed automatically. The base repository alone contains a 40.9 GB transformer and 16.6 GB text encoder. Start testing on an **80 GB GPU**. The full Qwen-Image-Edit-2511 is a 20B BF16 model and cold starts may be long. `USE_MOCK_PIPELINE=1` skips model loading in Hub smoke tests. `HF_TOKEN` can help with download rate limits.
+
+If a worker reports `Disk quota exceeded`, check its **Network Volume**, not only container-disk settings:
+
+```bash
+df -h /runpod-volume
+du -sh /runpod-volume/hf-cache /runpod-volume/hf-home /runpod-volume/models 2>/dev/null
+```
+
+Expand the volume or deliberately remove obsolete checkpoints/caches until at least 100 GB is free, then retry. A partial Hub download may resume. Do not delete the active `/runpod-volume/hf-cache` just to make space unless you intend to redownload the base model.
 
 Local tests cover request validation and exact outside-mask pixel preservation. Container build, GPU model loading, mask quality and RunPod image output still require a deployed test.
 
