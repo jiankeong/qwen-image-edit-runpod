@@ -1,6 +1,6 @@
-# Qwen-Image-Edit-2511 + Plana-Chan NSFW LoRA — RunPod
+# Qwen-Image-Edit-2511 NF4 + ScottzillaSystems LoRA — RunPod
 
-This worker uses the full [Qwen/Qwen-Image-Edit-2511](https://huggingface.co/Qwen/Qwen-Image-Edit-2511) editing pipeline and loads [Plana-Chan/qwen-image-edit-plus-nsfw-lora](https://huggingface.co/Plana-Chan/qwen-image-edit-plus-nsfw-lora). It no longer uses the Qwen Turbo GGUF or FLUX checkpoint. The linked repository is a LoRA adapter, not a replacement for the large Qwen base model; changing the adapter does not remove the base model's VRAM or disk requirements. If `QWEN_LORA_REPO` is already set in the RunPod endpoint, update it to this repository or remove the override before redeploying.
+This worker uses the [seochan99/Qwen-Image-Edit-2511-bnb-nf4](https://huggingface.co/seochan99/Qwen-Image-Edit-2511-bnb-nf4) quantized base and loads [ScottzillaSystems/qwen-image-edit-plus-nsfw-lora](https://huggingface.co/ScottzillaSystems/qwen-image-edit-plus-nsfw-lora). The base is a BitsAndBytes NF4 version of Qwen-Image-Edit-2511, not a separate editing architecture. If `QWEN_LORA_REPO` is already set in the RunPod endpoint, update it to the ScottzillaSystems repository or remove the override before redeploying.
 
 ## One uploaded image, targeted output
 
@@ -10,7 +10,7 @@ The worker runs Qwen image editing on the source image, segments the source with
 
 ## Deployment
 
-Attach a Network Volume at `/runpod-volume`; the Hub model cache, Xet cache and temporary downloads are all directed there. Allocate at least **100 GB free** for the BF16 base, LoRA, parser and downloads; previous model files are not removed automatically. The base repository alone contains a 40.9 GB transformer and 16.6 GB text encoder. Start testing on an **80 GB GPU**. The full Qwen-Image-Edit-2511 is a 20B BF16 model and cold starts may be long. `USE_MOCK_PIPELINE=1` skips model loading in Hub smoke tests. `HF_TOKEN` can help with download rate limits.
+Attach a Network Volume at `/runpod-volume`; the Hub model cache, Xet cache and temporary downloads are all directed there. Allocate at least **35 GB free** for the 18 GB NF4 base, LoRA, parser and downloads; previous BF16 files are not removed automatically. Start testing on a **24 GB GPU** with one request at a time. The model author reports approximately 17 GB VRAM for the quantized base on an RTX 4090; LoRA, image resolution and runtime overhead may push the total higher. `USE_MOCK_PIPELINE=1` skips model loading in Hub smoke tests. `HF_TOKEN` can help with download rate limits.
 
 If a worker reports `Disk quota exceeded`, check its **Network Volume**, not only container-disk settings:
 
@@ -19,12 +19,12 @@ df -h /runpod-volume
 du -sh /runpod-volume/hf-cache /runpod-volume/hf-home /runpod-volume/models 2>/dev/null
 ```
 
-Expand the volume or deliberately remove obsolete checkpoints/caches until at least 100 GB is free, then retry. A partial Hub download may resume. Do not delete the active `/runpod-volume/hf-cache` just to make space unless you intend to redownload the base model.
+Expand the volume or deliberately remove obsolete checkpoints/caches until at least 35 GB is free, then retry. A partial Hub download may resume. The old BF16 Qwen cache may still occupy the volume; check before deleting any cache because deleting the active NF4 cache forces a redownload.
 
 Local tests cover request validation and exact outside-mask pixel preservation. Container build, GPU model loading, mask quality and RunPod image output still require a deployed test.
 
 ### GPU memory
 
-`enable_model_cpu_offload()` still moves the entire 40.9 GB transformer onto the GPU during denoising, so a 24 GB GPU fails even if model loading succeeds. The worker now selects **sequential CPU offload** when less than 48 GiB of GPU memory is free; it also enables VAE tiling. This avoids the whole-transformer transfer but is much slower and may exceed the endpoint timeout. For dependable throughput, use a GPU with around **80 GB VRAM**. `QWEN_OFFLOAD_MODE=model|sequential|auto` can override the automatic choice; `auto` is the default. Allocator fragmentation settings cannot make a 40.9 GB component fit in 24 GB VRAM.
+The NF4 base uses **model CPU offload** by default, including on 24 GB GPUs, and enables VAE tiling. This avoids the very slow sequential offload used for the previous BF16 base. `QWEN_OFFLOAD_MODE=model|sequential|auto` can override it; `auto` selects `model`. If a large image still causes OOM, try `sequential` or a higher-VRAM GPU. The specific NF4 + LoRA pair and image quality still need live RunPod verification.
 
-The Docker build pins Diffusers 0.37.0, Transformers 4.x and `huggingface-hub<1.0` in one resolver transaction. It imports the Qwen and SegFormer classes and runs `pip check` before the image is published, preventing the earlier `huggingface-hub==1.32.0` runtime import error.
+The Docker build pins Diffusers 0.37.0, Transformers 4.x, `huggingface-hub<1.0` and installs BitsAndBytes in one resolver transaction. It imports the Qwen and SegFormer classes and runs `pip check` before the image is published, preventing the earlier `huggingface-hub==1.32.0` runtime import error.

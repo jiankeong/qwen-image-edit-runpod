@@ -11,8 +11,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageOps
 
-BASE_REPO = "Qwen/Qwen-Image-Edit-2511"
-LORA_REPO = os.getenv("QWEN_LORA_REPO", "Plana-Chan/qwen-image-edit-plus-nsfw-lora")
+BASE_REPO = "seochan99/Qwen-Image-Edit-2511-bnb-nf4"
+LORA_REPO = os.getenv("QWEN_LORA_REPO", "ScottzillaSystems/qwen-image-edit-plus-nsfw-lora")
 PARSER_REPO = "mattmdjaga/segformer_b2_clothes"
 CACHE_DIR = Path(os.getenv("RUNPOD_VOLUME_PATH", "/runpod-volume")) / "hf-cache"
 CLOTHES_LABELS = (4, 5, 6, 7, 8, 17)
@@ -22,12 +22,10 @@ _PROCESSOR = None
 
 
 def configure_offload(pipe, free_vram_gib, mode="auto"):
-    """Avoid moving the 40.9 GB transformer as one piece onto a 24 GB GPU."""
+    """The NF4 transformer fits in 24 GB; offload whole components for speed."""
     if mode not in ("auto", "model", "sequential"):
         raise ValueError("QWEN_OFFLOAD_MODE must be auto, model, or sequential")
-    selected = "sequential" if mode == "auto" and free_vram_gib < 48 else mode
-    if selected == "auto":
-        selected = "model"
+    selected = "model" if mode == "auto" else mode
     if selected == "sequential":
         pipe.enable_sequential_cpu_offload()
     else:
@@ -45,8 +43,9 @@ def storage_quota_message(path):
         f"Model download exhausted storage at {path}; Network Volume "
         f"{volume}: {usage.free / gib:.1f} GiB free / "
         f"{usage.total / gib:.1f} GiB total. "
-        "Qwen-Image-Edit-2511 needs about 60 GB for its base weights alone. "
-        "Expand the Network Volume to at least 100 GB free, or remove old "
+        "The NF4 base is about 18 GB on disk; reserve at least 35 GB free "
+        "for the base, LoRA, parser and download overhead. "
+        "Expand the Network Volume or remove old "
         "model/cache files after checking what they contain. "
         f"Inspect with: df -h {volume}; du -sh {volume}/hf-cache "
         f"{volume}/hf-home {volume}/models 2>/dev/null"

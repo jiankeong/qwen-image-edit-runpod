@@ -15,14 +15,22 @@ import handler
 
 
 class QwenWorkerTests(unittest.TestCase):
-    def test_offload_selects_sequential_for_24gb_gpu(self):
+    def test_nf4_auto_offload_selects_model_for_24gb_gpu(self):
         pipe = SimpleNamespace(
             enable_sequential_cpu_offload=unittest.mock.Mock(),
             enable_model_cpu_offload=unittest.mock.Mock(),
         )
-        self.assertEqual(handler.configure_offload(pipe, 23.5), 'sequential')
+        self.assertEqual(handler.configure_offload(pipe, 23.5), 'model')
+        pipe.enable_model_cpu_offload.assert_called_once_with()
+        pipe.enable_sequential_cpu_offload.assert_not_called()
+
+    def test_sequential_offload_remains_explicit_option(self):
+        pipe = SimpleNamespace(
+            enable_sequential_cpu_offload=unittest.mock.Mock(),
+            enable_model_cpu_offload=unittest.mock.Mock(),
+        )
+        self.assertEqual(handler.configure_offload(pipe, 23.5, 'sequential'), 'sequential')
         pipe.enable_sequential_cpu_offload.assert_called_once_with()
-        pipe.enable_model_cpu_offload.assert_not_called()
 
     def test_offload_selects_model_for_large_gpu(self):
         pipe = SimpleNamespace(
@@ -78,7 +86,7 @@ class QwenWorkerTests(unittest.TestCase):
             with patch.dict(os.environ, {'RUNPOD_VOLUME_PATH': volume}):
                 message = handler.storage_quota_message(os.path.join(volume, 'hf-cache'))
         self.assertIn('GiB free', message)
-        self.assertIn('100 GB free', message)
+        self.assertIn('35 GB free', message)
         self.assertIn('df -h', message)
 
     def test_pipeline_download_quota_has_actionable_error(self):
@@ -94,6 +102,30 @@ class QwenWorkerTests(unittest.TestCase):
                  patch.object(handler, '_PIPELINE', None):
                 with self.assertRaisesRegex(RuntimeError, 'Expand the Network Volume'):
                     handler.get_pipeline()
+
+    def test_pipeline_loads_nf4_base_then_requested_lora(self):
+        pipe = SimpleNamespace(
+            load_lora_weights=unittest.mock.Mock(),
+            enable_model_cpu_offload=unittest.mock.Mock(),
+            enable_sequential_cpu_offload=unittest.mock.Mock(),
+            enable_vae_tiling=unittest.mock.Mock(),
+        )
+        load_base = unittest.mock.Mock(return_value=pipe)
+        fake_diffusers = SimpleNamespace(QwenImageEditPlusPipeline=SimpleNamespace(from_pretrained=load_base))
+        fake_torch = SimpleNamespace(
+            bfloat16='bf16',
+            cuda=SimpleNamespace(is_available=lambda: True, mem_get_info=lambda: (23 * 1024 ** 3, 24 * 1024 ** 3)),
+        )
+        with tempfile.TemporaryDirectory() as volume:
+            with patch.dict(sys.modules, {'torch': fake_torch, 'diffusers': fake_diffusers}), \
+                 patch.object(handler, 'CACHE_DIR', __import__('pathlib').Path(volume) / 'hf-cache'), \
+                 patch.object(handler, '_PIPELINE', None), \
+                 patch.dict(os.environ, {'QWEN_OFFLOAD_MODE': 'auto'}):
+                self.assertIs(handler.get_pipeline(), pipe)
+        self.assertEqual(load_base.call_args.args[0], 'seochan99/Qwen-Image-Edit-2511-bnb-nf4')
+        self.assertEqual(pipe.load_lora_weights.call_args.args[0], handler.LORA_REPO)
+        pipe.enable_model_cpu_offload.assert_called_once_with()
+        pipe.enable_vae_tiling.assert_called_once_with()
 
 
 if __name__ == '__main__':

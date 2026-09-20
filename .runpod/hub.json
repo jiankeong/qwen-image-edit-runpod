@@ -1,13 +1,13 @@
 {
   "title": "Qwen Image Edit 2511 + NSFW LoRA",
-  "description": "One-image targeted editing using Qwen-Image-Edit-2511 and Plana-Chan NSFW LoRA; untouched pixels copied from source.",
+  "description": "One-image targeted editing using NF4 Qwen-Image-Edit-2511 and ScottzillaSystems NSFW LoRA; untouched pixels copied from source.",
   "type": "serverless",
   "category": "image",
   "config": {
     "runsOn": "GPU",
     "containerDiskInGb": 40,
     "gpuCount": 1,
-    "gpuIds": "ADA_80_PRO,AMPERE_80",
+    "gpuIds": "ADA_24,AMPERE_24,ADA_80_PRO,AMPERE_80",
     "allowedCudaVersions": [
       "12.8",
       "12.9",
@@ -32,7 +32,7 @@
           "name": "Qwen image-edit LoRA repository",
           "type": "string",
           "description": "Hugging Face LoRA to apply to Qwen-Image-Edit-2511.",
-          "default": "Plana-Chan/qwen-image-edit-plus-nsfw-lora",
+          "default": "ScottzillaSystems/qwen-image-edit-plus-nsfw-lora",
           "advanced": true
         }
       },
